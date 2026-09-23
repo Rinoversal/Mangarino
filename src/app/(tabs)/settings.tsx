@@ -4,7 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-nat
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { clearPageCache, pageCacheSizeBytes } from '@/cache/pageCache';
-import { ReaderMode, ReadingDirection, useSettings } from '@/store/settings';
+import { PANEL_OUTLINE_SWATCHES, ReaderMode, ReadingDirection, useSettings } from '@/store/settings';
 import { colors, radius, spacing } from '@/ui/theme';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -51,6 +51,35 @@ function Segmented<T extends string>({
   );
 }
 
+function Swatches({
+  value,
+  options,
+  onChange,
+}: {
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (v: string) => void;
+}) {
+  return (
+    <View style={styles.swatches}>
+      {options.map((o) => {
+        const active = o.value.toLowerCase() === value.toLowerCase();
+        return (
+          <Pressable
+            key={o.value}
+            onPress={() => onChange(o.value)}
+            accessibilityRole="button"
+            accessibilityLabel={o.label}
+            accessibilityState={{ selected: active }}
+            style={[styles.swatchRing, active && styles.swatchRingActive]}>
+            <View style={[styles.swatch, { backgroundColor: o.value }]} />
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 export default function SettingsScreen() {
   const { settings, set } = useSettings();
   const [cacheMB, setCacheMB] = useState<number | null>(null);
@@ -89,6 +118,9 @@ export default function SettingsScreen() {
               ]}
               onChange={(v) => void set('defaultMode', v)}
             />
+          </Row>
+          <Row label="Panel outline" hint="Colour of the box drawn around the current panel in panel mode.">
+            <Swatches value={settings.panelOutline} options={PANEL_OUTLINE_SWATCHES} onChange={(v) => void set('panelOutline', v)} />
           </Row>
           <Row label="Tap zones" hint="Tap the left or right third of the screen to turn pages. Centre shows the controls.">
             <Switch value={settings.tapZones} onValueChange={(v) => void set('tapZones', v)} trackColor={{ true: colors.accent }} />
@@ -155,6 +187,10 @@ const styles = StyleSheet.create({
   segmentActive: { backgroundColor: colors.accent },
   segmentText: { color: colors.muted, fontWeight: '600', fontSize: 13 },
   segmentTextActive: { color: colors.accentText },
+  swatches: { width: 136, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8 },
+  swatchRing: { width: 28, height: 28, borderRadius: 14, borderWidth: 2, borderColor: 'transparent', alignItems: 'center', justifyContent: 'center' },
+  swatchRingActive: { borderColor: colors.text },
+  swatch: { width: 20, height: 20, borderRadius: 10, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
   button: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.md, backgroundColor: colors.bg },
   buttonText: { color: colors.text, fontWeight: '600' },
 });

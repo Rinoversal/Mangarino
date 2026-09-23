@@ -8,6 +8,7 @@ import { scheduleOnRN } from 'react-native-worklets';
 import { PageRow } from '@/db/repo';
 import { PanelRect, parsePagePanels } from '@/library/panels';
 import { useReaderPages } from '@/store/reader';
+import { panelOutlineColor, useSettings } from '@/store/settings';
 
 export interface PanelHandle {
   next: () => void;
@@ -57,6 +58,7 @@ export const PanelReader = forwardRef<PanelHandle, PanelReaderProps>(function Pa
   const uri = useReaderPages((s) => s.pageUris[pageIndex]);
   const error = useReaderPages((s) => s.errors[pageIndex]);
   const panels = useMemo(() => parsePagePanels(page?.panels_json ?? null), [page]);
+  const outlineColor = useSettings((s) => panelOutlineColor(s.settings.panelOutline));
   const [loadedDims, setLoadedDims] = useState<{ w: number; h: number; uri: string } | null>(null);
   const imgW = page?.width ?? (loadedDims?.uri === uri ? loadedDims.w : null);
   const imgH = page?.height ?? (loadedDims?.uri === uri ? loadedDims.h : null);
@@ -246,7 +248,7 @@ export const PanelReader = forwardRef<PanelHandle, PanelReaderProps>(function Pa
             <Animated.View pointerEvents="none" style={[styles.mask, maskBottom]} />
             <Animated.View pointerEvents="none" style={[styles.mask, maskLeft]} />
             <Animated.View pointerEvents="none" style={[styles.mask, maskRight]} />
-            <Animated.View pointerEvents="none" style={[styles.outline, outline]} />
+            <Animated.View pointerEvents="none" style={[styles.outline, { borderColor: outlineColor }, outline]} />
           </Animated.View>
         ) : uri ? (
           // Dimensions unknown: mount a hidden image to learn them.
@@ -267,7 +269,7 @@ const styles = StyleSheet.create({
   viewport: { backgroundColor: '#000', overflow: 'hidden' },
   stage: { position: 'absolute', left: 0, top: 0 },
   mask: { position: 'absolute', backgroundColor: 'rgba(4,8,20,0.82)' },
-  outline: { position: 'absolute', borderWidth: 6, borderColor: '#ff2d95', borderRadius: 4 },
+  outline: { position: 'absolute', borderWidth: 6, borderRadius: 4 },
   probe: { position: 'absolute', width: 1, height: 1, opacity: 0 },
   center: { position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', gap: 12 },
   label: { color: '#666' },
