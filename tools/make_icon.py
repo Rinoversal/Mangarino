@@ -1,48 +1,37 @@
-"""Render Mangarino's placeholder icon set (navy page with pink M). Run from the repo root."""
-from PIL import Image, ImageDraw, ImageFont
+"""Build the app icon set from assets/logo/mangarino-logo.png. Run from the repo root."""
+from PIL import Image, ImageChops
 
+SRC = "assets/logo/mangarino-logo.png"
 SIZE = 1024
-BG = (11, 16, 32, 255)        # deep navy
-ACCENT = (255, 45, 149, 255)  # neon pink
-WHITE = (245, 245, 250, 255)
-INK = (14, 18, 34, 255)
+NAVY = (8, 21, 59, 255)  # background colour sampled from the logo
 
 
-def page(draw, x, y, w, h, border=26):
-    draw.rounded_rectangle([x, y, x + w, y + h], radius=40, fill=WHITE, outline=INK, width=border)
-    gy = y + int(h * 0.46)
-    draw.rectangle([x, gy - border // 2, x + w, gy + border // 2], fill=INK)
-    gx = x + int(w * 0.5)
-    draw.rectangle([gx - border // 2, gy, gx + border // 2, y + h], fill=INK)
-    draw.polygon(
-        [(x + int(w * 0.62), y), (x + int(w * 0.72), y), (x + int(w * 0.5), gy), (x + int(w * 0.4), gy)],
-        fill=INK,
-    )
+def logo_square():
+    im = Image.open(SRC).convert("RGBA")
+    bg = Image.new("RGBA", im.size, NAVY)
+    mask = ImageChops.difference(im, bg).convert("L").point(lambda v: 255 if v > 24 else 0)
+    box = mask.getbbox()
+    pad = 36
+    l, t, r, b = max(0, box[0] - pad), max(0, box[1] - pad), min(im.width, box[2] + pad), min(im.height, box[3] + pad)
+    crop = im.crop((l, t, r, b))
+    side = max(crop.width, crop.height)
+    sq = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+    sq.paste(crop, ((side - crop.width) // 2, (side - crop.height) // 2))
+    return sq
 
 
-def letter(draw, cx, cy, size):
-    try:
-        font = ImageFont.truetype("C:/Windows/Fonts/arialbd.ttf", size)
-    except OSError:
-        font = ImageFont.load_default()
-    bbox = draw.textbbox((0, 0), "M", font=font)
-    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    draw.text((cx - tw / 2 - bbox[0], cy - th / 2 - bbox[1]), "M", font=font, fill=ACCENT)
+def place(logo, canvas_bg, fraction, out):
+    canvas = Image.new("RGBA", (SIZE, SIZE), canvas_bg)
+    target = int(SIZE * fraction)
+    scaled = logo.resize((target, target), Image.LANCZOS)
+    canvas.alpha_composite(scaled, ((SIZE - target) // 2, (SIZE - target) // 2))
+    canvas.save(out)
 
 
-def render(background, scale, out):
-    img = Image.new("RGBA", (SIZE, SIZE), background)
-    d = ImageDraw.Draw(img)
-    w, h = int(430 * scale), int(560 * scale)
-    x, y = (SIZE - w) // 2, (SIZE - h) // 2
-    page(d, x, y, w, h, border=int(26 * scale))
-    letter(d, x + int(w * 0.27), y + int(h * 0.24), int(230 * scale))
-    img.save(out)
-
-
-render(BG, 1.25, "assets/images/icon.png")
-render((0, 0, 0, 0), 0.95, "assets/images/android-icon-foreground.png")
-Image.new("RGBA", (SIZE, SIZE), BG).save("assets/images/android-icon-background.png")
+logo = logo_square()
+place(logo, NAVY, 0.92, "assets/images/icon.png")                       # legacy square icon
+place(logo, (0, 0, 0, 0), 0.66, "assets/images/android-icon-foreground.png")  # adaptive safe zone
+Image.new("RGBA", (SIZE, SIZE), NAVY).save("assets/images/android-icon-background.png")
 Image.open("assets/images/android-icon-foreground.png").convert("LA").save("assets/images/android-icon-monochrome.png")
-render((0, 0, 0, 0), 0.8, "assets/images/splash-icon.png")
-print("icons written")
+place(logo, (0, 0, 0, 0), 0.7, "assets/images/splash-icon.png")
+print("icon set written from", SRC)
