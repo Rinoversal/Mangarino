@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo/mangarino-logo.png" alt="Mangarino" width="180"></p>
+
 # Mangarino
 
 **A manga reader for Android that reads the files you already have, remembers where you are,
