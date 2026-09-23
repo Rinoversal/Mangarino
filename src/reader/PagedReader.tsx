@@ -18,6 +18,7 @@ export interface PagedReaderProps {
   height: number;
   onIndexChange: (pageIndex: number) => void;
   onSingleTap: (xFrac: number, yFrac: number) => void;
+  onVerticalSwipe?: () => void;
   onRetry: (pageIndex: number) => void;
   onLoaded?: (pageIndex: number, w: number, h: number) => void;
 }
@@ -28,6 +29,7 @@ function PageCell({
   height,
   onZoomChange,
   onSingleTap,
+  onVerticalSwipe,
   onRetry,
   onLoaded,
 }: {
@@ -36,6 +38,7 @@ function PageCell({
   height: number;
   onZoomChange: (z: boolean) => void;
   onSingleTap: (x: number, y: number) => void;
+  onVerticalSwipe?: () => void;
   onRetry: (i: number) => void;
   onLoaded?: (i: number, w: number, h: number) => void;
 }) {
@@ -52,6 +55,7 @@ function PageCell({
       label={`Page ${index + 1}`}
       onZoomChange={onZoomChange}
       onSingleTap={onSingleTap}
+      onVerticalSwipe={onVerticalSwipe}
       onRetry={retry}
       onLoaded={loaded}
     />
@@ -63,7 +67,7 @@ function PageCell({
  * so list index = n-1-page in RTL and page 0 sits at the right end.
  */
 export const PagedReader = forwardRef<PagerHandle, PagedReaderProps>(function PagedReader(
-  { pages, initialIndex, rtl, width, height, onIndexChange, onSingleTap, onRetry, onLoaded },
+  { pages, initialIndex, rtl, width, height, onIndexChange, onSingleTap, onVerticalSwipe, onRetry, onLoaded },
   ref,
 ) {
   const listRef = useRef<FlatList<number>>(null);
@@ -122,6 +126,7 @@ export const PagedReader = forwardRef<PagerHandle, PagedReaderProps>(function Pa
           height={height}
           onZoomChange={setZoomed}
           onSingleTap={onSingleTap}
+          onVerticalSwipe={onVerticalSwipe}
           onRetry={onRetry}
           onLoaded={onLoaded}
         />

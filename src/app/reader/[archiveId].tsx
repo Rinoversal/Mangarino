@@ -284,6 +284,8 @@ export default function ReaderScreen() {
     setNotice(has ? 'Bookmark removed' : 'Bookmarked');
   }, [bookmarks, current]);
 
+  const toggleChrome = useCallback(() => setChrome((c) => !c), []);
+
   const setModeFromChrome = useCallback((m: ReaderMode) => {
     setPanelStart(0);
     setMode(m);
@@ -354,6 +356,7 @@ export default function ReaderScreen() {
           height={height}
           onPositionChange={onPanelPosition}
           onSingleTap={onSingleTap}
+          onVerticalSwipe={toggleChrome}
           onEndReached={() => void goToNextArchive()}
         />
       ) : (
@@ -367,6 +370,7 @@ export default function ReaderScreen() {
           height={height}
           onIndexChange={onIndexChange}
           onSingleTap={onSingleTap}
+          onVerticalSwipe={toggleChrome}
           onRetry={(i) => loaderRef.current?.retry(i)}
         />
       )}

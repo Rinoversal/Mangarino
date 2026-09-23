@@ -24,6 +24,7 @@ export interface PanelReaderProps {
   height: number;
   onPositionChange: (pageIndex: number, panelIndex: number) => void;
   onSingleTap: (xFrac: number, yFrac: number) => void;
+  onVerticalSwipe?: () => void;
   onEndReached: () => void;
 }
 
@@ -46,7 +47,7 @@ function fitTarget(rect: PanelRect, imgW: number, imgH: number, vw: number, vh: 
 
 /** Guided view: animates translate/scale so each precomputed panel fills the viewport. */
 export const PanelReader = forwardRef<PanelHandle, PanelReaderProps>(function PanelReader(
-  { pages, initialPage, initialPanel, rtl, width, height, onPositionChange, onSingleTap, onEndReached },
+  { pages, initialPage, initialPanel, rtl, width, height, onPositionChange, onSingleTap, onVerticalSwipe, onEndReached },
   ref,
 ) {
   const [pageIndex, setPageIndex] = useState(initialPage);
@@ -208,7 +209,15 @@ export const PanelReader = forwardRef<PanelHandle, PanelReaderProps>(function Pa
     .onEnd(() => {
       scheduleOnRN(prev);
     });
-  const composed = Gesture.Race(flingNext, flingPrev, Gesture.Exclusive(doubleTap, singleTap));
+  const swipe = useCallback(() => {
+    onVerticalSwipe?.();
+  }, [onVerticalSwipe]);
+  const flingVertical = Gesture.Fling()
+    .direction(Directions.UP | Directions.DOWN)
+    .onEnd(() => {
+      scheduleOnRN(swipe);
+    });
+  const composed = Gesture.Race(flingNext, flingPrev, flingVertical, Gesture.Exclusive(doubleTap, singleTap));
 
   const onLoad = useCallback(
     (e: ImageLoadEventData) => {

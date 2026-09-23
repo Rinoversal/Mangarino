@@ -1,7 +1,7 @@
 import { Image, ImageLoadEventData } from 'expo-image';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { Directions, Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withDecay, withTiming } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 
@@ -15,6 +15,8 @@ export interface ZoomablePageProps {
   maxScale?: number;
   onZoomChange?: (zoomed: boolean) => void;
   onSingleTap?: (xFrac: number, yFrac: number) => void;
+  /** Vertical swipe (up or down) while not zoomed; used to toggle the reader menu. */
+  onVerticalSwipe?: () => void;
   onRetry?: () => void;
   onLoaded?: (w: number, h: number) => void;
 }
@@ -37,6 +39,7 @@ export function ZoomablePage({
   maxScale = 5,
   onZoomChange,
   onSingleTap,
+  onVerticalSwipe,
   onRetry,
   onLoaded,
 }: ZoomablePageProps) {
@@ -150,7 +153,22 @@ export function ZoomablePage({
       scheduleOnRN(tap, e.x / width, e.y / height);
     });
 
-  const composed = Gesture.Race(Gesture.Simultaneous(pinch, pan), Gesture.Exclusive(doubleTap, singleTap));
+  const swipe = useCallback(() => {
+    onVerticalSwipe?.();
+  }, [onVerticalSwipe]);
+
+  const verticalFling = Gesture.Fling()
+    .enabled(!zoomed)
+    .direction(Directions.UP | Directions.DOWN)
+    .onEnd(() => {
+      scheduleOnRN(swipe);
+    });
+
+  const composed = Gesture.Race(
+    Gesture.Simultaneous(pinch, pan),
+    verticalFling,
+    Gesture.Exclusive(doubleTap, singleTap),
+  );
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: tx.value }, { translateY: ty.value }, { scale: scale.value }],
