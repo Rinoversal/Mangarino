@@ -64,6 +64,11 @@ export const PanelReader = forwardRef<PanelHandle, PanelReaderProps>(function Pa
   const ty = useSharedValue(0);
   const scale = useSharedValue(1);
   const opacity = useSharedValue(1);
+  // Current panel rect in image pixels, animated alongside the stage so the dimming mask follows it.
+  const rx = useSharedValue(0);
+  const ry = useSharedValue(0);
+  const rw = useSharedValue(1);
+  const rh = useSharedValue(1);
   const pageChanged = useRef(false);
 
   const clampPanel = useCallback(
@@ -132,6 +137,10 @@ export const PanelReader = forwardRef<PanelHandle, PanelReaderProps>(function Pa
       tx.value = t.tx;
       ty.value = t.ty;
       scale.value = t.s;
+      rx.value = rect.x;
+      ry.value = rect.y;
+      rw.value = rect.w;
+      rh.value = rect.h;
       opacity.value = withTiming(1, { duration: FADE_MS });
       return;
     }
@@ -139,12 +148,41 @@ export const PanelReader = forwardRef<PanelHandle, PanelReaderProps>(function Pa
     tx.value = withTiming(t.tx, cfg);
     ty.value = withTiming(t.ty, cfg);
     scale.value = withTiming(t.s, cfg);
+    rx.value = withTiming(rect.x, cfg);
+    ry.value = withTiming(rect.y, cfg);
+    rw.value = withTiming(rect.w, cfg);
+    rh.value = withTiming(rect.h, cfg);
     opacity.value = withTiming(1, { duration: FADE_MS });
-  }, [imgW, imgH, uri, fullPage, panels, panelIndex, width, height, clampPanel, tx, ty, scale, opacity]);
+  }, [imgW, imgH, uri, fullPage, panels, panelIndex, width, height, clampPanel, tx, ty, scale, opacity, rx, ry, rw, rh]);
 
   const stageStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,
     transform: [{ translateX: tx.value }, { translateY: ty.value }, { scale: scale.value }],
+  }));
+
+  // Dimming mask: four rectangles around the current panel, in image coordinates inside the stage.
+  const stageW = imgW ?? 1;
+  const stageH = imgH ?? 1;
+  const maskTop = useAnimatedStyle(() => ({ left: 0, top: 0, width: stageW, height: Math.max(0, ry.value) }));
+  const maskBottom = useAnimatedStyle(() => ({
+    left: 0,
+    top: ry.value + rh.value,
+    width: stageW,
+    height: Math.max(0, stageH - (ry.value + rh.value)),
+  }));
+  const maskLeft = useAnimatedStyle(() => ({ left: 0, top: ry.value, width: Math.max(0, rx.value), height: rh.value }));
+  const maskRight = useAnimatedStyle(() => ({
+    left: rx.value + rw.value,
+    top: ry.value,
+    width: Math.max(0, stageW - (rx.value + rw.value)),
+    height: rh.value,
+  }));
+  const outline = useAnimatedStyle(() => ({
+    left: rx.value,
+    top: ry.value,
+    width: rw.value,
+    height: rh.value,
+    opacity: fullPage || panels.length === 0 ? 0 : 1,
   }));
 
   const tapCb = useCallback((x: number, y: number) => onSingleTap(x, y), [onSingleTap]);
@@ -195,6 +233,11 @@ export const PanelReader = forwardRef<PanelHandle, PanelReaderProps>(function Pa
               recyclingKey={uri}
               onLoad={onLoad}
             />
+            <Animated.View pointerEvents="none" style={[styles.mask, maskTop]} />
+            <Animated.View pointerEvents="none" style={[styles.mask, maskBottom]} />
+            <Animated.View pointerEvents="none" style={[styles.mask, maskLeft]} />
+            <Animated.View pointerEvents="none" style={[styles.mask, maskRight]} />
+            <Animated.View pointerEvents="none" style={[styles.outline, outline]} />
           </Animated.View>
         ) : uri ? (
           // Dimensions unknown: mount a hidden image to learn them.
@@ -214,6 +257,8 @@ export const PanelReader = forwardRef<PanelHandle, PanelReaderProps>(function Pa
 const styles = StyleSheet.create({
   viewport: { backgroundColor: '#000', overflow: 'hidden' },
   stage: { position: 'absolute', left: 0, top: 0 },
+  mask: { position: 'absolute', backgroundColor: 'rgba(4,8,20,0.82)' },
+  outline: { position: 'absolute', borderWidth: 6, borderColor: '#ff2d95', borderRadius: 4 },
   probe: { position: 'absolute', width: 1, height: 1, opacity: 0 },
   center: { position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', gap: 12 },
   label: { color: '#666' },
