@@ -1,23 +1,21 @@
 import * as Application from 'expo-application';
-import { Directory, File } from 'expo-file-system';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { Platform } from 'react-native';
 
-import { toFileUri } from './paths';
+import { createFreshFile, ensureDirectory } from './externalFs';
 
 /**
- * All-files access has no JS query API; probe by creating the library root and
- * writing a throwaway file. Under scoped storage without the permission this throws.
- * Side effect: the Mangarino folder exists afterwards, ready for a USB copy.
+ * All-files access has no JS query API; probe by creating the library root and a throwaway
+ * file in it. Under scoped storage without the permission this throws.
+ * expo-file-system only allows writes to paths that already exist, so the folder is created
+ * level by level and the file with createFile (writing a brand-new File directly always fails).
+ * Side effect: the Mangarino folder exists afterwards, ready for a copy.
  */
 export function probeAllFilesAccess(rootPath: string): boolean {
   if (Platform.OS !== 'android') return true;
   try {
-    const dir = new Directory(toFileUri(rootPath));
-    if (!dir.exists) dir.create({ intermediates: true, idempotent: true });
-    const probe = new File(dir, '.mangarino-probe');
-    probe.write('ok');
-    probe.delete();
+    const dir = ensureDirectory(rootPath);
+    createFreshFile(dir, '.mangarino-probe', 'text/plain').delete();
     return true;
   } catch {
     return false;

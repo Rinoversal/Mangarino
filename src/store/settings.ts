@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 
+import { APP_NAME } from '@/brand';
 import { getAllSettings, setSetting } from '@/db/repo';
 
 export type ReadingDirection = 'rtl' | 'ltr';
@@ -43,7 +44,7 @@ export const DEFAULT_SETTINGS: Settings = {
   spreadsInLandscape: false,
   keepAwake: true,
   cacheCapMB: 200,
-  libraryRoot: '/storage/emulated/0/Mangarino',
+  libraryRoot: `/storage/emulated/0/${APP_NAME}`,
   showPageNumber: true,
   defaultMode: 'page',
   panelOutline: DEFAULT_PANEL_OUTLINE,

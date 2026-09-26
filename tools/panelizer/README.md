@@ -6,9 +6,10 @@ navigation without running a model on the tablet.
 
 ## Requirements
 
-Python 3.11 with `ultralytics`, `torch` (CUDA build for GPU), `pillow`, `huggingface_hub`, `numpy`
-(see `requirements.txt`). On first run the model checkpoint (~15 MB) is downloaded from Hugging
-Face into `models/` and reused afterwards.
+Python 3.11 with `ultralytics`, `torch` (CUDA build for GPU), `transformers`, `pillow`,
+`huggingface_hub`, `numpy` (see `requirements.txt`). On first run the two models are downloaded
+from Hugging Face into `models/` and reused afterwards: the panel detector (~15 MB) and the
+speech-bubble detector (~170 MB).
 
 ## Usage
 
@@ -31,6 +32,7 @@ Options:
 | `--batch 16` | 16 | pages per inference batch |
 | `--device auto\|cpu\|0` | auto | `auto` = CUDA if available, else CPU |
 | `--ltr` | off | left-to-right reading order (default is manga right-to-left) |
+| `--bubbles on\|off` | on | grow panels over speech bubbles found by the bubble model; `off` uses only the panel model's lettering boxes |
 | `--dry-run` | off | detect and print the summary, never touch the archive (`--json-out` still writes) |
 | `--json-out DIR` | - | also write `<archive stem>.panels.json` into DIR |
 
@@ -59,6 +61,8 @@ with DEFLATE, and the temp file is `os.replace`d over the original. Page CRCs ar
 {
   "version": 1,
   "rtl": true,
+  "text": true,
+  "bubbles": "ogkalu/comic-text-and-bubble-detector",
   "model": "leoxs22/manga-panel-detector-yolo26n",
   "conf": 0.25,
   "pages": {
@@ -75,11 +79,38 @@ with DEFLATE, and the temp file is `os.replace`d over the original. Page CRCs ar
   `panels` list when nothing was detected. `__MACOSX/`, `._*` and `Thumbs.db` are ignored.
 - Coordinates are integer pixels in the original image, clamped to the image bounds.
 - `rtl` is `false` when the file was produced with `--ltr`.
+- `text` is `true` when panels were grown over spilling speech bubbles. Files without it were
+  written by an older panelizer; re-run with `--overwrite` to get the growth.
+- `bubbles` names the bubble model used for that growth, or is `null` when the file was written
+  with `--bubbles off` (or the bubble model could not load). Files without the key predate it.
 
 ## Post-processing and reading order
 
-Per page: keep class 0 (panel) only; drop boxes smaller than 1% of the page area; merge boxes
-with IoU > 0.7 into their union. Then sort into reading order:
+Per page: split the detections into panels (class 0) and text (class 1); drop panels smaller
+than 1% of the page area; merge panels with IoU > 0.7 into their union.
+
+Then grow panels over speech bubbles and captions that spill past their border. The boxes to
+grow over come from three places:
+
+- **Whole balloons** from the bubble model (class `bubble`), padded by 0.5% of the page width.
+- **Lettering outside any detected balloon**, from either model. The tool looks for the container
+  around it straight in the page image: the paper between the letters belongs to the region
+  inside the balloon's or caption's outline, so that region's bounding box is the container,
+  whatever its shape (round, square or jagged). The container is used, padded by 0.5%. When no
+  container is found (the region touches the page edge, is more than 8 times the lettering's
+  box, or doesn't enclose the lettering, as with white text on a black box), the lettering is
+  used, padded by 2%.
+- **Loose text** (class `text_free`) only when it sits in a closed container, like a narration
+  caption. Bare loose text may be a sound effect drawn across panels, so it is skipped.
+
+Each box goes to the panel holding the largest share of it, if that share is at least 15%. When
+the box pokes out of that panel by more than 0.5% of the page width, the panel becomes its union
+with the padded box. Boxes wholly inside a panel, or outside every panel, change nothing.
+With `--bubbles off`, only the panel model's lettering boxes are used, padded by 2%.
+
+Boxes are rounded to integer pixels and sorted into reading order. The app re-sorts them with
+a port of the same code for the reader's current direction, so a manga-order file still reads
+left to right in Western mode; `__tests__/panels.test.ts` checks the two against each other.
 
 1. Cluster boxes into rows. Two boxes share a row when their vertical overlap is at least 40% of
    the shorter box's height (transitively).
@@ -105,7 +136,11 @@ the error and falls back to CPU automatically.
 
 - Model: **Manga Panel and Text Detector (YOLO26-nano)** by Leandro Narosky,
   https://huggingface.co/leoxs22/manga-panel-detector-yolo26n (Apache-2.0).
-  Classes: 0 = panel, 1 = text. Input 640x640, recommended conf 0.25.
+  Classes: 0 = panel (named `frame`), 1 = text. Input 640x640, recommended conf 0.25.
+- Model: **comic-text-and-bubble-detector** (RT-DETR-v2 r50vd) by ogkalu,
+  https://huggingface.co/ogkalu/comic-text-and-bubble-detector (Apache-2.0).
+  Classes: 0 = bubble, 1 = text inside a bubble, 2 = text outside bubbles. Input 640x640;
+  the panelizer keeps detections scoring 0.3 or more.
 - Training data: **Manga109-s** (Aizawa et al.), https://huggingface.co/datasets/hal-utokyo/Manga109-s.
   Per its license, results from machine-learning experiments may be used provided the dataset
   use is indicated, which this notice does.

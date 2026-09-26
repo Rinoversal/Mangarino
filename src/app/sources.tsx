@@ -5,14 +5,17 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, AppState, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { APP_NAME, HUB_NAME } from '@/brand';
 import { SourceRow, addSource, removeSourceAndArchives } from '@/db/repo';
 import { fromFileUri, toFileUri } from '@/platform/paths';
 import { probeAllFilesAccess, requestAllFilesAccess } from '@/platform/permissions';
 import { useLibrary } from '@/store/library';
 import { useSettings } from '@/store/settings';
+import { readableColumn } from '@/ui/layout';
 import { colors, radius, spacing } from '@/ui/theme';
 
 const ARCHIVE_RE = /\.(cbz|zip)$/i;
+const samePath = (a: string, b: string) => a.trim().replace(/[\\/]+$/, '').toLowerCase() === b.trim().replace(/[\\/]+$/, '').toLowerCase();
 
 export default function SourcesScreen() {
   const { settings, set } = useSettings();
@@ -42,9 +45,12 @@ export default function SourcesScreen() {
   const applyRoot = async () => {
     const path = rootDraft.trim().replace(/[\\/]+$/, '');
     if (!path) return;
+    // Same folder (maybe typed with a slash or another case): nothing to redo. Redoing it would
+    // drop every volume from the library, and their reading history with them.
+    if (samePath(path, settings.libraryRoot)) return;
     await set('libraryRoot', path);
     for (const s of sources) if (s.kind === 'folder') await removeSourceAndArchives(s.id);
-    await addSource('folder', toFileUri(path), 'Mangarino folder');
+    await addSource('folder', toFileUri(path), `${APP_NAME} folder`);
     await refresh();
     setGranted(probeAllFilesAccess(path));
   };
@@ -64,7 +70,8 @@ export default function SourcesScreen() {
       for (const a of picked) {
         const dest = new File(importsDir, a.name);
         if (dest.exists) dest.delete();
-        new File(a.uri).move(dest);
+        // move() returns a Promise since SDK 56; finish each move before the rescan reads the folder.
+        await new File(a.uri).move(dest);
       }
       await addSource('imported', importsDir.uri, 'Imported files');
       await rescan();
@@ -91,7 +98,7 @@ export default function SourcesScreen() {
 
   return (
     <SafeAreaView style={styles.root} edges={['top', 'left', 'right']}>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView contentContainerStyle={[styles.content, readableColumn]}>
         <Pressable onPress={() => router.back()} style={styles.back}>
           <Text style={styles.backText}>‹ Back</Text>
         </Pressable>
@@ -100,7 +107,7 @@ export default function SourcesScreen() {
         <View style={styles.card}>
           <Text style={styles.cardTitle}>All files access</Text>
           <Text style={styles.text}>
-            Mangarino reads your archives where they are, without copying them. Android needs the &quot;All files access&quot;
+            {APP_NAME} reads your archives where they are, without copying them. Android needs the &quot;All files access&quot;
             permission for that.
           </Text>
           <View style={styles.statusRow}>
@@ -118,8 +125,8 @@ export default function SourcesScreen() {
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Library folder</Text>
           <Text style={styles.text}>
-            Put each series in its own folder here, e.g. Mangarino › Berserk › the .cbz files. Copy them over USB, then
-            Rescan.
+            Put each series in its own folder here, e.g. {APP_NAME} › Berserk › the .cbz or .zip files, or folders of
+            images. Copy them over USB or from your PC, then Rescan.
           </Text>
           <TextInput
             value={rootDraft}
@@ -127,14 +134,14 @@ export default function SourcesScreen() {
             autoCapitalize="none"
             autoCorrect={false}
             style={styles.input}
-            placeholder="/storage/emulated/0/Mangarino"
+            placeholder={`/storage/emulated/0/${APP_NAME}`}
             placeholderTextColor={colors.muted}
           />
           <View style={styles.buttonRow}>
             <Pressable
               onPress={() => void applyRoot()}
-              disabled={rootDraft.trim() === settings.libraryRoot}
-              style={[styles.button, rootDraft.trim() === settings.libraryRoot && styles.disabled]}>
+              disabled={samePath(rootDraft, settings.libraryRoot)}
+              style={[styles.button, samePath(rootDraft, settings.libraryRoot) && styles.disabled]}>
               <Text style={styles.buttonText}>Use this folder</Text>
             </Pressable>
             <Pressable onPress={() => void rescan()} disabled={!!scan} style={[styles.button, styles.accentButton]}>
@@ -149,9 +156,20 @@ export default function SourcesScreen() {
         </View>
 
         <View style={styles.card}>
+          <Text style={styles.cardTitle}>From your PC, over Wi-Fi</Text>
+          <Text style={styles.text}>
+            Run {HUB_NAME} on your PC to send manga to this device without a cable, send this device&apos;s manga to
+            the PC, and let the PC&apos;s graphics card add panels.
+          </Text>
+          <Pressable onPress={() => router.push('/pc')} style={[styles.button, styles.accentButton, styles.selfStart]}>
+            <Text style={styles.accentButtonText}>Open PC</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.card}>
           <Text style={styles.cardTitle}>Import files</Text>
           <Text style={styles.text}>
-            Pick .cbz files with the system picker. They are copied into Mangarino&apos;s private storage (a 450 MB volume
+            Pick .cbz files with the system picker. They are copied into {APP_NAME}&apos;s private storage (a 450 MB volume
             takes a little while), so prefer the library folder for big collections.
           </Text>
           <Pressable onPress={() => void importFiles()} disabled={!!busy} style={[styles.button, styles.selfStart]}>

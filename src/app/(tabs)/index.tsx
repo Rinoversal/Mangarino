@@ -4,6 +4,7 @@ import React, { useCallback } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { APP_NAME } from '@/brand';
 import { ContinueItem, SeriesSummary } from '@/db/repo';
 import { archiveLabel } from '@/library/parse';
 import { useLibrary } from '@/store/library';
@@ -33,14 +34,14 @@ function SeriesCard({ item, width }: { item: SeriesSummary; width: number }) {
   );
 }
 
-function ContinueCard({ item }: { item: ContinueItem }) {
+function ContinueCard({ item, width }: { item: ContinueItem; width: number }) {
   const pct = item.page_count > 0 ? Math.round(((item.page_index + 1) / item.page_count) * 100) : 0;
   return (
     <Pressable
       onPress={() =>
         router.push({ pathname: '/reader/[archiveId]', params: { archiveId: String(item.archive_id) } })
       }
-      style={({ pressed }) => [styles.continueCard, pressed && styles.cardPressed]}>
+      style={({ pressed }) => [styles.continueCard, { width }, pressed && styles.cardPressed]}>
       <View style={styles.continueCover}>
         {item.cover_uri ? (
           <Image source={{ uri: item.cover_uri }} style={styles.coverImage} contentFit="cover" />
@@ -66,6 +67,8 @@ export default function LibraryScreen() {
   const { width } = useWindowDimensions();
   const columns = Math.max(2, Math.floor((width - spacing.md) / 170));
   const cardWidth = (width - spacing.md * (columns + 1)) / columns;
+  // 300 wide, but never wider than a small phone's screen.
+  const continueWidth = Math.min(300, width - spacing.md * 2);
 
   useFocusEffect(
     useCallback(() => {
@@ -76,8 +79,11 @@ export default function LibraryScreen() {
   const header = (
     <View>
       <View style={styles.headerRow}>
-        <Text style={styles.h1}>Mangarino</Text>
+        <Text style={styles.h1}>{APP_NAME}</Text>
         <View style={styles.headerButtons}>
+          <Pressable onPress={() => router.push('/pc')} style={styles.headerButton}>
+            <Text style={styles.headerButtonText}>PC</Text>
+          </Pressable>
           <Pressable onPress={() => router.push('/sources')} style={styles.headerButton}>
             <Text style={styles.headerButtonText}>Sources</Text>
           </Pressable>
@@ -99,7 +105,7 @@ export default function LibraryScreen() {
             horizontal
             data={continueReading}
             keyExtractor={(c) => String(c.series_id)}
-            renderItem={({ item }) => <ContinueCard item={item} />}
+            renderItem={({ item }) => <ContinueCard item={item} width={continueWidth} />}
             contentContainerStyle={styles.continueList}
             showsHorizontalScrollIndicator={false}
           />
@@ -125,7 +131,7 @@ export default function LibraryScreen() {
             <View style={styles.empty}>
               <Text style={styles.emptyTitle}>No manga yet</Text>
               <Text style={styles.emptyText}>
-                Copy your CBZ files to Internal storage › Mangarino › (series name) on this tablet, then tap Rescan.
+                Copy your CBZ files to Internal storage › {APP_NAME} › (series name) on this device, then tap Rescan.
                 Sources lets you grant file access and import single files.
               </Text>
               <Pressable onPress={() => router.push('/sources')} style={[styles.headerButton, styles.accentButton]}>
@@ -143,7 +149,7 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   list: { padding: spacing.md, paddingBottom: spacing.xl },
   row: { gap: spacing.md, marginBottom: spacing.md },
-  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.sm },
+  headerRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, marginBottom: spacing.sm },
   headerButtons: { flexDirection: 'row', gap: spacing.sm },
   h1: { color: colors.text, fontSize: 28, fontWeight: '700' },
   h2: { color: colors.muted, fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1, marginTop: spacing.md, marginBottom: spacing.sm },
@@ -154,7 +160,7 @@ const styles = StyleSheet.create({
   scanText: { color: colors.muted, marginBottom: spacing.sm },
   errorText: { color: colors.danger, marginBottom: spacing.sm },
   continueList: { gap: spacing.sm },
-  continueCard: { flexDirection: 'row', width: 300, backgroundColor: colors.card, borderRadius: radius.md, overflow: 'hidden' },
+  continueCard: { flexDirection: 'row', backgroundColor: colors.card, borderRadius: radius.md, overflow: 'hidden' },
   continueCover: { width: 70, height: 100, backgroundColor: colors.cardActive },
   continueBody: { flex: 1, padding: spacing.sm, justifyContent: 'center', gap: 4 },
   card: { borderRadius: radius.md, overflow: 'hidden' },

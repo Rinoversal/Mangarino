@@ -33,6 +33,18 @@ const FIT_MARGIN = 0.96;
 const MAX_PAGE_FIT_MULTIPLE = 3;
 const MOVE_MS = 280;
 const FADE_MS = 140;
+/** Extra room kept around each panel, as a fraction of the page's shorter side, so art and
+ * speech bubbles touching the panel border are not clipped or dimmed. */
+const FOCUS_PAD_FRAC = 0.02;
+
+function padRect(rect: PanelRect, imgW: number, imgH: number): PanelRect {
+  const pad = FOCUS_PAD_FRAC * Math.min(imgW, imgH);
+  const x1 = Math.max(0, rect.x - pad);
+  const y1 = Math.max(0, rect.y - pad);
+  const x2 = Math.min(imgW, rect.x + rect.w + pad);
+  const y2 = Math.min(imgH, rect.y + rect.h + pad);
+  return { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
+}
 
 function fitTarget(rect: PanelRect, imgW: number, imgH: number, vw: number, vh: number) {
   let s = Math.min(vw / rect.w, vh / rect.h) * FIT_MARGIN;
@@ -57,7 +69,8 @@ export const PanelReader = forwardRef<PanelHandle, PanelReaderProps>(function Pa
   const page = pages[pageIndex];
   const uri = useReaderPages((s) => s.pageUris[pageIndex]);
   const error = useReaderPages((s) => s.errors[pageIndex]);
-  const panels = useMemo(() => parsePagePanels(page?.panels_json ?? null), [page]);
+  // Re-sorted for the current direction: panel order in the archive is fixed at panelize time.
+  const panels = useMemo(() => parsePagePanels(page?.panels_json ?? null, rtl), [page, rtl]);
   const outlineColor = useSettings((s) => panelOutlineColor(s.settings.panelOutline));
   const [loadedDims, setLoadedDims] = useState<{ w: number; h: number; uri: string } | null>(null);
   const imgW = page?.width ?? (loadedDims?.uri === uri ? loadedDims.w : null);
@@ -133,7 +146,9 @@ export const PanelReader = forwardRef<PanelHandle, PanelReaderProps>(function Pa
   useEffect(() => {
     if (!imgW || !imgH || !uri) return;
     const rect: PanelRect =
-      fullPage || panels.length === 0 ? { x: 0, y: 0, w: imgW, h: imgH } : panels[clampPanel(panelIndex, panels.length)];
+      fullPage || panels.length === 0
+        ? { x: 0, y: 0, w: imgW, h: imgH }
+        : padRect(panels[clampPanel(panelIndex, panels.length)], imgW, imgH);
     const t = fitTarget(rect, imgW, imgH, width, height);
     if (pageChanged.current) {
       pageChanged.current = false;

@@ -411,6 +411,33 @@ export async function replaceArchiveIndex(
   });
 }
 
+/**
+ * New panel boxes for an archive's pages (by entry name), e.g. the PC's, made with the
+ * speech-bubble fix. Returns how many pages got them.
+ */
+export async function applyArchivePanels(
+  archiveId: number,
+  pages: Record<string, { w: number | null; h: number | null; panels: unknown[] }>,
+): Promise<number> {
+  const db = getDb();
+  let changed = 0;
+  await db.withTransactionAsync(async () => {
+    for (const [name, p] of Object.entries(pages)) {
+      const r = await db.runAsync(
+        'UPDATE pages SET panels_json = ?, width = COALESCE(width, ?), height = COALESCE(height, ?) WHERE archive_id = ? AND entry_name = ?',
+        JSON.stringify(p.panels),
+        p.w,
+        p.h,
+        archiveId,
+        name,
+      );
+      changed += r.changes;
+    }
+    if (changed) await db.runAsync('UPDATE archives SET has_panels = 1 WHERE id = ?', archiveId);
+  });
+  return changed;
+}
+
 export function getZipEntries(archiveId: number): Promise<ZipEntryRow[]> {
   return getDb().getAllAsync<ZipEntryRow>(
     'SELECT * FROM zip_entries WHERE archive_id = ? ORDER BY entry_index',
@@ -445,6 +472,72 @@ export async function setPageDims(archiveId: number, pageIndex: number, width: n
 
 export function getProgress(archiveId: number): Promise<ProgressRow | null> {
   return getDb().getFirstAsync<ProgressRow>('SELECT * FROM progress WHERE archive_id = ?', archiveId);
+}
+
+export interface SyncProgressRow {
+  archive_id: number;
+  series_id: number;
+  uri: string;
+  file_name: string;
+  kind: ArchiveKind;
+  page_index: number;
+  panel_index: number | null;
+  completed: number;
+  updated_ms: number;
+}
+
+/** Progress rows changed after `ms`, with what identifies their archive across devices. */
+export function listProgressChangedSince(ms: number): Promise<SyncProgressRow[]> {
+  return getDb().getAllAsync<SyncProgressRow>(
+    `SELECT p.archive_id, a.series_id, a.uri, a.file_name, a.kind, p.page_index, p.panel_index, p.completed, p.updated_ms
+       FROM progress p JOIN archives a ON a.id = p.archive_id
+      WHERE p.updated_ms > ?`,
+    ms,
+  );
+}
+
+/**
+ * Progress read on another device (through the PC hub). Applied only if it is newer than what
+ * this device has, keeping the other device's timestamp so the newest change wins everywhere.
+ * Returns whether anything changed.
+ */
+export async function applySyncedProgress(
+  archiveId: number,
+  seriesId: number,
+  pageIndex: number,
+  panelIndex: number | null,
+  completed: boolean,
+  updatedMs: number,
+): Promise<boolean> {
+  const db = getDb();
+  let changed = false;
+  await db.withTransactionAsync(async () => {
+    const r = await db.runAsync(
+      `INSERT INTO progress (archive_id, page_index, panel_index, completed, updated_ms) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(archive_id) DO UPDATE SET page_index = excluded.page_index, panel_index = excluded.panel_index,
+         completed = excluded.completed, updated_ms = excluded.updated_ms
+       WHERE excluded.updated_ms > progress.updated_ms`,
+      archiveId,
+      pageIndex,
+      panelIndex,
+      completed ? 1 : 0,
+      updatedMs,
+    );
+    changed = r.changes > 0;
+    if (changed) {
+      await db.runAsync(
+        `INSERT INTO series_progress (series_id, archive_id, page_index, updated_ms) VALUES (?, ?, ?, ?)
+         ON CONFLICT(series_id) DO UPDATE SET archive_id = excluded.archive_id, page_index = excluded.page_index,
+           updated_ms = excluded.updated_ms
+         WHERE excluded.updated_ms > series_progress.updated_ms`,
+        seriesId,
+        archiveId,
+        pageIndex,
+        updatedMs,
+      );
+    }
+  });
+  return changed;
 }
 
 export async function saveProgress(
@@ -637,4 +730,8 @@ export async function deleteCacheRow(archiveId: number, pageIndex: number): Prom
 
 export async function clearCacheRows(): Promise<void> {
   await getDb().runAsync('DELETE FROM page_cache');
+}
+
+export async function deleteArchiveCacheRows(archiveId: number): Promise<void> {
+  await getDb().runAsync('DELETE FROM page_cache WHERE archive_id = ?', archiveId);
 }

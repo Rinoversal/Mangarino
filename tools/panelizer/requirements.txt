@@ -2,4 +2,5 @@ ultralytics>=8.4
 torch>=2.4
 pillow>=10
 huggingface_hub>=0.23
+transformers>=4.49
 numpy>=1.24

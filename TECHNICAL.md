@@ -57,9 +57,12 @@ name. Series folders are the series title; the user can override it.
   double-tap zoom and single-tap zones. Progress saves are debounced 400 ms and flushed on
   exit.
 - **Panel mode.** If the archive contains `mangarino-panels.json`, each page's panel boxes are
-  stored in `pages.panels_json` in reading order. The reader mounts the page at full
-  resolution inside an animated stage and animates translate/scale so the current box fills
-  the viewport (with 4 % margin, capped at 3x page-fit). Crossing a page boundary fades out,
+  stored in `pages.panels_json` in reading order. The reader re-sorts them with a port of the
+  panelizer's ordering (`readingOrder` in `src/library/panels.ts`) for the current direction,
+  so a volume panelized for manga still steps left to right in Western mode. It mounts the page
+  at full resolution inside an animated stage and animates translate/scale so the current box,
+  padded by 2 % of the page's shorter side, fills the viewport (with 4 % margin, capped at 3x
+  page-fit). Crossing a page boundary fades out,
   swaps the image, positions instantly and fades in. Pages without boxes show whole.
 - **Progress.** `progress` (per archive: page, panel, completed) and `series_progress`
   (per series: last archive and page) are written in one transaction. `history` records each
@@ -77,9 +80,44 @@ Written into the archive as `mangarino-panels.json` by `tools/panelizer/panelize
 ```
 
 Coordinates are pixels in the original image. Boxes are class 0 (panel) detections, filtered
-(area over 1 % of the page, IoU over 0.7 merged), clustered into rows by vertical overlap and
-ordered top to bottom, right to left (left to right with `--ltr`). The app also accepts the
+(area over 1 % of the page, IoU over 0.7 merged), grown to take in the speech bubbles and
+captions that spill over their border, clustered into rows by vertical overlap and ordered top
+to bottom, right to left (left to right with `--ltr`). Bubbles come from a second model
+(ogkalu/comic-text-and-bubble-detector, RT-DETR-v2) that boxes whole balloons; lettering it
+doesn't cover gets its container found from the page image (the paper region walled in by the
+balloon or caption outline), falling back to the lettering padded by 2 %. `"text": true` marks
+files written with growth and `"bubbles"` names the bubble model (null with `--bubbles off`);
+older files lack them and should be re-run with `--overwrite`. The app also accepts the
 bare `{ "<entry>": [rects] }` form.
+
+## PC hub (tools/hub)
+
+A small Python server (stdlib `ThreadingHTTPServer`, port 6264) that shares a PC folder with
+the app. The app is always the client: it downloads from and uploads to the hub, so Android
+never runs a server.
+
+- **Security.** Private-network and Tailscale (100.64.0.0/10) clients only. Devices pair with a
+  6-digit code shown on the PC (rotating, new code after 5 wrong tries) and get a random token,
+  stored hashed on the PC. The PC's status page and `/admin/*` only answer on loopback with a
+  loopback Host header and a per-run key embedded in the page.
+- **Library.** Mirrors the app's layout rules (`src/library/layout.ts`) in Python: archives,
+  image-folder volumes (packed on demand into a stored `.cbz` whose size is known in advance,
+  cached 8 GB LRU), junk ignored. A volume is offered once its copy has finished (untouched for
+  a minute, or unchanged across two scans 10 s apart). A generation number lets the app poll
+  cheaply.
+- **Transfers.** `GET /api/volume/<id>` warms a file up (disk spin-up, packing) before the app's
+  download; `GET /api/file/<id>` supports Range and a version pin (412 when the file changed).
+  `PUT /api/upload` streams to a temp file, checks the zip and swaps it in atomically.
+- **Panels.** A background worker runs the panelizer (both models) on volumes without panels,
+  pauses while a device transfers, and swaps rewritten archives in through a gate that waits for
+  readers (Windows can't replace open files; devices get 503 + Retry-After meanwhile).
+- **App side.** `src/pc/` (pure address and matching logic, API client, discovery by sweeping the
+  device's /24 with 700 ms probes, transfers) and `src/store/pcSync.ts`. Downloads go to a
+  `.mangarino-<id>.part` created with `Directory.createFile` (expo-file-system only writes to
+  paths that already exist), are checked (size, zip directory), then renamed over any old copy,
+  whose page cache is cleared. Plain HTTP needs `usesCleartextTraffic` (expo-build-properties).
+  The link remembers the hub's home address and, if it has one, its Tailscale address; the app
+  tries home first, then Tailscale.
 
 ## Android specifics
 

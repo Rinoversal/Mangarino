@@ -2,6 +2,7 @@ import {
   archiveSortKey,
   naturalCompare,
   normalizeSeriesKey,
+  pageCompare,
   parseArchiveName,
   parseEntryName,
 } from '../src/library/parse';
@@ -89,5 +90,29 @@ describe('normalizeSeriesKey', () => {
   it('collapses punctuation and case', () => {
     expect(normalizeSeriesKey('  Berserk!  ')).toBe('berserk');
     expect(normalizeSeriesKey('One-Piece')).toBe(normalizeSeriesKey('one piece'));
+  });
+});
+
+describe('pageCompare', () => {
+  // The same list and order are checked for the PC hub in tools/hub/tests/test_folders.py
+  // (PageOrderTest): synced reading progress is a page number, so both must agree.
+  const ordered = [
+    '001.jpg',
+    '2.jpg',
+    '010.jpg',
+    'Ch 2/1.jpg',
+    'Ch 2/9.jpg',
+    'Ch 2/10.jpg',
+    'Ch 10/1.jpg',
+    'image.png',
+    'image (1).png',
+    'image (2).png',
+    'image (10).png',
+    'IMG_20240101_0002.jpg',
+    'IMG_20240101_0010.jpg',
+  ];
+  it('puts pages in reading order, including copies Windows names "image (1)"', () => {
+    const shuffled = [...ordered].reverse();
+    expect(shuffled.sort(pageCompare)).toEqual(ordered);
   });
 });

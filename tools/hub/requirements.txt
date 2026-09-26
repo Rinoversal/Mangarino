@@ -1,0 +1,7 @@
+# The hub itself is the Python standard library plus these:
+segno>=1.6        # the pairing QR code
+pywebview>=5.0    # its own window (uses Microsoft Edge WebView2, part of Windows 10 and 11)
+pystray>=0.19     # the tray icon, so it keeps running when the window is closed
+pillow>=10.0      # the tray icon image and small cover images for devices
+# Panel detection reuses the panelizer's packages: see ../panelizer/requirements.txt.
+# Without them the hub still shares files; panels just show as off.

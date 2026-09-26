@@ -2,6 +2,7 @@ import { Directory, File, Paths } from 'expo-file-system';
 
 import {
   clearCacheRows,
+  deleteArchiveCacheRows,
   deleteCacheRow,
   getCacheRows,
   oldestCacheRows,
@@ -15,6 +16,17 @@ let evicting: Promise<void> | null = null;
 
 export function pageCacheRoot(): Directory {
   return new Directory(Paths.cache, 'pages');
+}
+
+/** Forget one archive's cached pages, after its file was replaced by a different copy. */
+export async function clearArchivePages(archiveId: number): Promise<void> {
+  try {
+    const d = new Directory(pageCacheRoot(), String(archiveId));
+    if (d.exists) d.delete();
+  } catch {
+    // already gone
+  }
+  await deleteArchiveCacheRows(archiveId);
 }
 
 function archiveDir(archiveId: number): Directory {

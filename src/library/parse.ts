@@ -147,6 +147,17 @@ export function naturalCompare(a: string, b: string): number {
   return ta.length - tb.length;
 }
 
+const EXT_RE = /\.[^./\\]+$/;
+
+/**
+ * Reading order of the pages in a volume: natural order of the names without their extensions
+ * first, so "image.png" comes before "image (1).png" (how Windows names copies of a download).
+ * Must match page_key() in tools/hub/mangarino_hub/library.py: synced progress is a page number.
+ */
+export function pageCompare(a: string, b: string): number {
+  return naturalCompare(a.replace(EXT_RE, ''), b.replace(EXT_RE, '')) || naturalCompare(a, b);
+}
+
 /** A string whose plain byte order equals natural order (for SQL ORDER BY). */
 export function naturalKey(s: string): string {
   return s.toLowerCase().replace(/\d+/g, (d) => d.padStart(8, '0'));

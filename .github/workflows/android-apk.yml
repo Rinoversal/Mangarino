@@ -1,0 +1,108 @@
+# Builds a release APK in the cloud and attaches it to a GitHub release, so a test build
+# can be downloaded straight onto the tablet. Runs on every push to main, or by hand from
+# the Actions tab ("Run workflow"); by hand it can also build Testarino, the public test edition.
+name: Android APK
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'tools/**'
+      - '**.md'
+      - '.github/**'  # workflow edits alone don't need an APK; run it by hand if they do
+      - '__tests__/**'  # test-only changes (tests run locally and in the next build)
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: 'Edition to build'
+        type: choice
+        options: [mangarino, testarino]
+        default: mangarino
+      release:
+        description: 'Attach to this existing release (its tag, like v1.1.0) instead of making a test build'
+        type: string
+        default: ''
+
+permissions:
+  contents: write
+
+env:
+  # app.config.ts reads this: "testarino" gives another name, app id and hub port.
+  APP_VARIANT: ${{ inputs.variant || 'mangarino' }}
+
+concurrency:
+  group: android-apk-${{ github.ref }}-${{ inputs.variant || 'mangarino' }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # Pushes make test builds only in the private repo; public releases are picked by hand.
+    if: github.event_name == 'workflow_dispatch' || github.event.repository.private
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck and test
+        run: |
+          npx tsc --noEmit
+          npx jest
+
+      - name: Generate the native Android project
+        run: npx expo prebuild --platform android
+
+      - name: Build release APK
+        working-directory: android
+        # arm64 only: every current Android tablet/phone, and a quarter of the native compile
+        # time of the default four ABIs on the small private-repo runners.
+        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
+
+      - name: Name the APK
+        run: |
+          if [ "$APP_VARIANT" = "testarino" ]; then name="Testarino"; else name="Mangarino"; fi
+          echo "APK_NAME=$name" >> "$GITHUB_ENV"
+
+      - name: Keep the APK as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APK_NAME }}-build-${{ github.run_number }}
+          path: android/app/build/outputs/apk/release/app-release.apk
+
+      # No --target: the built-in token may not tag a commit that is no longer the branch tip
+      # when its workflow files differ (a newer push landed during the build). The title and
+      # notes name the exact commit instead.
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE: ${{ inputs.release }}
+        run: |
+          if [ -n "$RELEASE" ]; then
+            apk="$APK_NAME-${RELEASE#v}.apk"
+            cp android/app/build/outputs/apk/release/app-release.apk "$apk"
+            gh release upload "$RELEASE" "$apk" --clobber
+            exit 0
+          fi
+          n="${{ github.run_number }}"
+          if [ "$APP_VARIANT" = "testarino" ]; then
+            tag="testarino-$n"; apk="Testarino-$n.apk"
+          else
+            tag="build-$n"; apk="Mangarino-build-$n.apk"
+          fi
+          cp android/app/build/outputs/apk/release/app-release.apk "$apk"
+          gh release create "$tag" "$apk" \
+            --title "${APK_NAME} test build ${{ github.run_number }} (${GITHUB_SHA::7})" \
+            --notes "Built from ${{ github.sha }}: $(git log -1 --format=%s)" \
+            --prerelease

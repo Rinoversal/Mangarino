@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="admin-key" content="__ADMIN_KEY__">
+<title>Mangarino Hub</title>
+<link rel="icon" type="image/png" href="/logo.png">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<div class="app" id="app">
+  <aside class="rail">
+    <div class="brand">
+      <img class="brand-logo" src="/logo.png" alt="">
+      <div class="brand-word">Mangarino<span>Hub</span></div>
+    </div>
+    <nav class="nav" aria-label="Sections">
+      <button class="nav-item" data-view="library"><span class="ico" data-icon="library"></span><span>Library</span></button>
+      <button class="nav-item" data-view="devices"><span class="ico" data-icon="devices"></span><span>Devices</span><span class="nav-badge" id="navBadge" hidden></span></button>
+      <button class="nav-item" data-view="settings"><span class="ico" data-icon="settings"></span><span>Settings</span><span class="nav-dot" id="navWarn" hidden></span></button>
+    </nav>
+    <div class="rail-activity" id="railActivity" hidden></div>
+    <div class="rail-foot">
+      <div class="status" id="status"><span class="pulse"></span><span id="statusText">Starting</span></div>
+      <div class="rail-pc" id="railPc"></div>
+    </div>
+  </aside>
+
+  <main class="stage">
+    <!-- Library ------------------------------------------------------------------------ -->
+    <section class="view" id="view-library" hidden>
+      <header class="view-head">
+        <div class="view-title">
+          <div class="eyebrow" id="libEyebrow">On this PC</div>
+          <h1 id="libHeading">Library</h1>
+          <p class="lede" id="libLede"></p>
+        </div>
+        <div class="head-tools">
+          <div class="seg" role="radiogroup" aria-label="Reading direction">
+            <button role="radio" data-dir="rtl">Manga</button>
+            <button role="radio" data-dir="ltr">Western</button>
+          </div>
+        </div>
+      </header>
+      <section class="shelf-wrap" id="continueWrap" hidden>
+        <h2 class="section-title">Continue reading</h2>
+        <div class="shelf" id="continue"></div>
+      </section>
+      <section>
+        <div class="section-bar">
+          <button class="back-link" id="backToSeries" hidden><span class="ico" data-icon="back"></span>All series</button>
+          <h2 class="section-title" id="gridTitle">All series</h2>
+        </div>
+        <div class="grid" id="grid"></div>
+      </section>
+      <div class="empty" id="libEmpty" hidden>
+        <div class="empty-art" data-art="books"></div>
+        <h2>Your manga folder is empty</h2>
+        <p>Send volumes from your tablet: in Mangarino, tap <b>PC</b>, then <b>Send</b> under “Only on this device”. Or point the hub at the folder where your manga already is.</p>
+        <div class="row center"><button class="btn primary" id="emptyChoose">Choose folder</button></div>
+      </div>
+    </section>
+
+    <!-- Devices ------------------------------------------------------------------------ -->
+    <section class="view" id="view-devices" hidden>
+      <header class="view-head">
+        <div class="view-title">
+          <div class="eyebrow">Sync</div>
+          <h1>Devices</h1>
+          <p class="lede">Phones and tablets that get manga from this PC and share where you’re up to.</p>
+        </div>
+      </header>
+      <div class="requests" id="requestList"></div>
+      <div class="device-list" id="devices"></div>
+
+      <section class="connect" id="connect">
+        <div class="connect-art" data-art="link"></div>
+        <div class="connect-body">
+          <h2 id="connectTitle">Connect a phone or tablet</h2>
+          <ol class="steps">
+            <li><span class="step-n">1</span><div>Open <b>Mangarino</b> on your device, on the same Wi-Fi as this PC.</div></li>
+            <li><span class="step-n">2</span><div>Tap <b>PC</b>, then tap <b class="pc-name">this PC</b>.</div></li>
+            <li><span class="step-n">3</span><div>Choose <b>Allow</b> here when it asks.</div></li>
+          </ol>
+          <button class="text-btn" id="otherWaysBtn" aria-expanded="false"><span class="ico" data-icon="qr"></span>Other ways to connect</button>
+          <div class="other-ways" id="otherWays" hidden>
+            <div class="qr" id="qr" role="button" tabindex="0" title="Click to show it full screen"></div>
+            <div class="other-text">
+              <p>Scan this in Mangarino (PC › <b>Scan QR code</b>), or tap <b>Enter a code</b> and type:</p>
+              <div class="code" id="code">––– –––</div>
+              <p class="faint" id="addresses"></p>
+              <p class="faint" id="codeNote">The code changes after each use and every 10 minutes.</p>
+              <button class="btn ghost sm" id="newCode">New code</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel-card" id="transfersCard">
+        <h2 class="section-title">Transfers</h2>
+        <div id="transfers"></div>
+      </section>
+    </section>
+
+    <!-- Settings ----------------------------------------------------------------------- -->
+    <section class="view" id="view-settings" hidden>
+      <header class="view-head">
+        <div class="view-title">
+          <div class="eyebrow">Mangarino Hub</div>
+          <h1>Settings</h1>
+        </div>
+      </header>
+
+      <div class="settings">
+        <div class="set-group">
+          <div class="set-row">
+            <span class="set-ico" data-icon="folder"></span>
+            <div class="set-text">
+              <div class="set-name">Manga folder</div>
+              <div class="set-desc mono" id="libPath">…</div>
+              <div class="set-desc" id="libStats"></div>
+              <div class="set-note" id="libNote"></div>
+            </div>
+            <div class="set-ctl"><button class="btn ghost" id="chooseFolder">Change</button></div>
+          </div>
+          <form class="set-row sub" id="pathForm">
+            <span class="set-ico"></span>
+            <input id="pathInput" type="text" placeholder="Or paste a folder path, like D:\Manga" autocomplete="off" spellcheck="false">
+            <div class="set-ctl"><button type="submit" class="btn ghost">Use</button></div>
+          </form>
+        </div>
+
+        <div class="set-group">
+          <div class="set-row">
+            <span class="set-ico" data-icon="panels"></span>
+            <div class="set-text">
+              <div class="set-name">Panel detection</div>
+              <div class="set-desc" id="panelState">…</div>
+              <div class="meter" id="panelBarWrap" hidden><div class="meter-fill" id="panelBar"></div></div>
+              <div class="set-desc faint" id="panelStats"></div>
+            </div>
+            <div class="set-ctl">
+              <select id="panelMode" aria-label="Panel detection">
+                <option value="auto">Auto (graphics card)</option>
+                <option value="on">On (also CPU, slow)</option>
+                <option value="off">Off</option>
+              </select>
+            </div>
+          </div>
+          <div class="set-row sub" id="panelActions" hidden>
+            <span class="set-ico"></span>
+            <div class="set-text"><div class="set-desc">New volumes get panels automatically, with speech bubbles kept whole.</div></div>
+            <div class="set-ctl row">
+              <button class="btn ghost" id="choosePanelizer" hidden>Choose panelizer folder</button>
+              <button class="btn ghost" id="upgrade" hidden></button>
+              <button class="btn ghost" id="retry" hidden></button>
+            </div>
+          </div>
+        </div>
+
+        <div class="set-group">
+          <div class="set-row">
+            <span class="set-ico" data-icon="globe"></span>
+            <div class="set-text">
+              <div class="set-name">Away from home</div>
+              <div class="set-desc">Sync and read from anywhere, not just on your home Wi-Fi.</div>
+            </div>
+            <div class="set-ctl"><button class="switch" id="awaySwitch" role="switch" aria-checked="false" aria-label="Away from home"><span></span></button></div>
+          </div>
+          <div class="set-row sub" id="awayBody" hidden>
+            <span class="set-ico"></span>
+            <div class="set-text away-steps">
+              <div class="set-desc" id="awayState"></div>
+              <ol class="mini-steps">
+                <li>Install <b>Tailscale</b> (free) on this PC and on your phone or tablet.</li>
+                <li>Sign in to both with the <b>same account</b>, such as your Google account.</li>
+                <li>While you're home, scan this PC's QR code once in Mangarino (PC › Other ways to connect › Scan QR code).</li>
+              </ol>
+              <div class="set-desc faint">Tailscale links your own devices privately over the internet. Mangarino uses it by itself when you're out.</div>
+              <div class="row">
+                <button class="btn ghost sm" id="getTailscale">Get Tailscale</button>
+                <button class="btn ghost sm" id="awayQr">Show the QR code</button>
+              </div>
+            </div>
+          </div>
+          <div class="set-row" id="autostartRow" hidden>
+            <span class="set-ico" data-icon="power"></span>
+            <div class="set-text">
+              <div class="set-name">Start with Windows</div>
+              <div class="set-desc">Runs quietly in the tray, so your devices can always sync.</div>
+            </div>
+            <div class="set-ctl"><button class="switch" id="autostart" role="switch" aria-checked="false" aria-label="Start with Windows"><span></span></button></div>
+          </div>
+        </div>
+
+        <div class="set-group">
+          <div class="set-row">
+            <span class="set-ico" data-icon="shield"></span>
+            <div class="set-text">
+              <div class="set-name">Network access</div>
+              <div class="set-desc" id="firewall">Checking…</div>
+              <div class="set-note" id="firewallNote"></div>
+            </div>
+            <div class="set-ctl row">
+              <button class="btn primary" id="fixFirewall" hidden>Allow devices</button>
+              <button class="btn ghost" id="checkFirewall" hidden>Check again</button>
+            </div>
+          </div>
+          <div class="set-row">
+            <span class="set-ico" data-icon="log"></span>
+            <div class="set-text">
+              <div class="set-name">Troubleshooting</div>
+              <div class="set-desc" id="version"></div>
+            </div>
+            <div class="set-ctl row">
+              <button class="btn ghost" id="openLogs" hidden>Open log folder</button>
+              <button class="btn danger" id="quit">Quit</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- Reader ----------------------------------------------------------------------------- -->
+<div id="reader" hidden>
+  <div id="stage">
+    <div id="sheet">
+      <img id="page" alt="">
+      <div class="mask" id="maskTop"></div>
+      <div class="mask" id="maskBottom"></div>
+      <div class="mask" id="maskLeft"></div>
+      <div class="mask" id="maskRight"></div>
+      <div class="outline" id="outline"></div>
+    </div>
+    <div id="loading" class="loading" hidden><span class="spinner"></span></div>
+  </div>
+  <div class="reader-bar" id="bar">
+    <button class="rb" id="close" title="Back to the library (Esc)"><span class="ico" data-icon="back"></span></button>
+    <div class="rb-title">
+      <div id="rTitle"></div>
+      <div id="rPos" class="rb-pos"></div>
+    </div>
+    <button class="rb-chip" id="modeBtn" title="Panel by panel (P)"><span class="ico" data-icon="panels"></span><span>Panels</span></button>
+    <button class="rb-chip" id="dirBtn" title="Reading direction (D)"><span class="ico" data-icon="direction"></span><span id="dirLabel">Manga</span></button>
+    <button class="rb" id="fsBtn" title="Full screen (F)"><span class="ico" data-icon="expand"></span></button>
+  </div>
+  <input id="scrub" type="range" min="1" value="1" aria-label="Page">
+  <div id="readerToast" class="reader-toast" hidden></div>
+  <div id="help" class="reader-help">← → or click the sides to turn · Space next · P panels · D direction · F full screen · Esc library</div>
+</div>
+
+<!-- A device asking to connect ---------------------------------------------------------- -->
+<div class="scrim" id="pairScrim" hidden>
+  <div class="dialog" role="alertdialog" aria-labelledby="pairTitle" aria-describedby="pairText">
+    <div class="pair-art">
+      <span class="pair-dev" id="pairGlyph" data-icon="tablet"></span>
+      <span class="pair-dots"><i></i><i></i><i></i></span>
+      <span class="pair-dev" data-icon="pc"></span>
+    </div>
+    <h2 id="pairTitle"><span id="pairName">A device</span> wants to connect</h2>
+    <p id="pairText">It will be able to get and send manga, and sync where you’re up to.</p>
+    <div class="match">
+      <span>Check it shows</span>
+      <b id="pairMatch">0000</b>
+    </div>
+    <div class="dialog-actions">
+      <button class="btn ghost" id="pairDeny">Don’t allow</button>
+      <button class="btn primary" id="pairAllow">Allow</button>
+    </div>
+    <div class="dialog-foot" id="pairFoot"></div>
+  </div>
+</div>
+
+<!-- Getting a volume from a device ---------------------------------------------------------- -->
+<div class="scrim" id="fetchScrim" hidden>
+  <div class="dialog" role="dialog" aria-labelledby="fetchTitle">
+    <div class="pair-art">
+      <span class="pair-dev" id="fetchGlyph" data-icon="tablet"></span>
+      <span class="pair-dots"><i></i><i></i><i></i></span>
+      <span class="pair-dev" data-icon="pc"></span>
+    </div>
+    <h2 id="fetchTitle">Getting the volume</h2>
+    <p id="fetchText"></p>
+    <div class="meter fetch-meter" id="fetchMeterWrap" hidden><div class="meter-fill" id="fetchMeter"></div></div>
+    <div class="dialog-foot" id="fetchFoot"></div>
+    <div class="dialog-actions single"><button class="btn ghost" id="fetchClose">Close</button></div>
+  </div>
+</div>
+
+<div class="bigqr" id="bigqr" hidden>
+  <div id="bigqrCode"></div>
+  <div class="bigqr-code" id="bigqrText"></div>
+  <div class="bigqr-close">Click anywhere or press Esc to close</div>
+</div>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script src="/app.js"></script>
+<script src="/library.js"></script>
+</body>
+</html>

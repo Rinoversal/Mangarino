@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BookmarkView, deleteBookmark, listBookmarks } from '@/db/repo';
 import { archiveLabel } from '@/library/parse';
+import { readableColumn } from '@/ui/layout';
 import { colors, radius, spacing } from '@/ui/theme';
 
 export default function BookmarksScreen() {
@@ -39,7 +40,7 @@ export default function BookmarksScreen() {
       <FlatList
         data={items}
         keyExtractor={(b) => String(b.id)}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, readableColumn]}
         ListHeaderComponent={<Text style={styles.h1}>Bookmarks</Text>}
         ListEmptyComponent={
           <Text style={styles.empty}>No bookmarks yet. In the reader, tap the centre of the page and press ☆.</Text>

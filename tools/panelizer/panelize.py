@@ -2,12 +2,17 @@
 """panelize.py - detect manga panels in CBZ/ZIP archives (or folders of images)
 and store the result as a `mangarino-panels.json` entry for the Mangarino reader.
 
-Model: leoxs22/manga-panel-detector-yolo26n (Apache-2.0), a YOLO26-nano fine-tuned
-on Manga109-s. Classes: 0 = panel, 1 = text. Input size 640, recommended conf 0.25.
+Panels: leoxs22/manga-panel-detector-yolo26n (Apache-2.0), a YOLO26-nano fine-tuned
+on Manga109-s. Classes: 0 = panel ("frame"), 1 = text. Input size 640, recommended conf 0.25.
+
+Speech bubbles: ogkalu/comic-text-and-bubble-detector (Apache-2.0), an RT-DETR-v2 model.
+Classes: 0 = bubble (the whole balloon), 1 = text inside a bubble, 2 = text outside bubbles.
+Panels grow to take in any balloon that spills over their border (--bubbles off skips it).
 
 Usage:
     panelize.py <path> [<path> ...] [--overwrite] [--conf 0.25] [--imgsz 640]
-                [--batch 16] [--device auto|cpu|0] [--ltr] [--dry-run] [--json-out DIR]
+                [--batch 16] [--device auto|cpu|0] [--ltr] [--bubbles on|off]
+                [--dry-run] [--json-out DIR]
 """
 from __future__ import annotations
 
@@ -38,9 +43,19 @@ JSON_ENTRY = "mangarino-panels.json"
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif"}
 ARCHIVE_EXTS = {".cbz", ".zip"}
 PANEL_CLASS = 0
+TEXT_CLASS = 1
 MIN_AREA_FRAC = 0.01  # drop boxes smaller than 1% of the page
 MERGE_IOU = 0.7  # merge boxes overlapping more than this (keep the union)
 ROW_OVERLAP = 0.40  # vertical overlap (of the shorter box) needed to share a row
+TEXT_ATTACH_MIN = 0.15  # a text box belongs to a panel when at least this much of it lies inside
+TEXT_SPILL_FRAC = 0.005  # ...and it pokes out of that panel by more than this (of page width)
+TEXT_PAD_FRAC = 0.02  # text boxes hug the lettering; pad them (of page width) to take in the balloon
+BUBBLE_REPO = "ogkalu/comic-text-and-bubble-detector"
+BUBBLE_THRESHOLD = 0.3  # RT-DETR score cut-off
+BUBBLE_PAD_FRAC = 0.005  # whole-balloon and container boxes already include the outline
+COVERED_FRAC = 0.6  # text this much inside a detected balloon needs no container search
+CONTAINER_LIGHT = 200  # grey level counted as paper when finding the box around some lettering
+CONTAINER_MAX_MULT = 8.0  # a container's inside may be at most this many times the lettering's box
 
 
 # --------------------------------------------------------------------------- helpers
@@ -180,22 +195,176 @@ def reading_order(boxes: list[list[float]], rtl: bool = True) -> list[list[float
     return ordered
 
 
-def postprocess(xyxy, cls, w: int, h: int, sx: float, sy: float, rtl: bool) -> list[dict]:
-    """Class filter, scale to original pixels, clamp, area filter, merge, sort."""
+def attach_boxes(panels: list[list[float]], items: list[tuple[list[float], float]], w: int, h: int) -> list[list[float]]:
+    """Grow each panel over the balloons and captions that spill over its border.
+
+    `items` are (box, pad) pairs in page pixels, the pad being a fraction of the page width.
+    Every box is given to the panel holding the largest share of it (at least
+    TEXT_ATTACH_MIN of the box's area). If the box pokes out of that panel by more than
+    TEXT_SPILL_FRAC of the page width, the panel becomes the union with the padded box.
+    Boxes wholly inside their panel, or outside every panel, change nothing. Growth is
+    measured against the original panels, so one expansion never pulls in another panel's
+    balloons.
+    """
+    if not panels or not items:
+        return panels
+    out = [list(p) for p in panels]
+    spill = TEXT_SPILL_FRAC * w
+    for t, pad_frac in items:
+        area = (t[2] - t[0]) * (t[3] - t[1])
+        if area <= 0:
+            continue
+        best, best_frac = -1, 0.0
+        for i, p in enumerate(panels):
+            iw = min(t[2], p[2]) - max(t[0], p[0])
+            ih = min(t[3], p[3]) - max(t[1], p[1])
+            if iw > 0 and ih > 0 and iw * ih / area > best_frac:
+                best, best_frac = i, iw * ih / area
+        if best < 0 or best_frac < TEXT_ATTACH_MIN:
+            continue
+        p = panels[best]
+        if t[0] >= p[0] - spill and t[1] >= p[1] - spill and t[2] <= p[2] + spill and t[3] <= p[3] + spill:
+            continue
+        pad = pad_frac * w
+        o = out[best]
+        o[0] = max(0.0, min(o[0], t[0] - pad))
+        o[1] = max(0.0, min(o[1], t[1] - pad))
+        o[2] = min(float(w), max(o[2], t[2] + pad))
+        o[3] = min(float(h), max(o[3], t[3] + pad))
+    return out
+
+
+def attach_text(panels: list[list[float]], texts: list[list[float]], w: int, h: int) -> list[list[float]]:
+    """Lettering-only growth (--bubbles off): pad each text box to take in its balloon."""
+    return attach_boxes(panels, [(t, TEXT_PAD_FRAC) for t in texts], w, h)
+
+
+def light_components(im: Image.Image):
+    """Connected regions of paper-coloured pixels (4-connected), as (labels, stats) from
+    OpenCV. A balloon or caption box is one such region, walled in by its outline."""
+    import cv2
+    import numpy as np
+
+    grey = np.asarray(im.convert("L"))
+    mask = (grey >= CONTAINER_LIGHT).astype(np.uint8)
+    _, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=4)
+    return labels, stats
+
+
+def find_container(labels, stats, box: list[float]) -> list[float] | None:
+    """The balloon or caption box around the lettering in `box` (image pixels), or None.
+
+    The paper between the letters belongs to the region inside the container's outline, so
+    the region covering most of the lettering is the container, whatever its shape: round,
+    square or jagged. It is rejected when it touches the image edge, or when its inside
+    (pixels, not bounding box, so round and spiky balloons are not penalised) is more than
+    CONTAINER_MAX_MULT times the lettering's box: it leaked into open background. It is also
+    rejected when it does not enclose most of the lettering (light text on a dark box).
+    """
+    import numpy as np
+
+    H, W = labels.shape
+    x1, y1 = max(0, int(round(box[0]))), max(0, int(round(box[1])))
+    x2, y2 = min(W, int(round(box[2]))), min(H, int(round(box[3])))
+    if x2 - x1 < 2 or y2 - y1 < 2:
+        return None
+    win = labels[y1:y2, x1:x2]
+    ids, counts = np.unique(win[win > 0], return_counts=True)
+    if len(ids) == 0:
+        return None
+    lab = int(ids[np.argmax(counts)])
+    bx, by, bw, bh, inside = (int(v) for v in stats[lab][:5])
+    if bx <= 0 or by <= 0 or bx + bw >= W or by + bh >= H:
+        return None
+    text_area = (x2 - x1) * (y2 - y1)
+    if inside > CONTAINER_MAX_MULT * text_area:
+        return None
+    iw = min(x2, bx + bw) - max(x1, bx)
+    ih = min(y2, by + bh) - max(y1, by)
+    if iw <= 0 or ih <= 0 or iw * ih < 0.8 * text_area:
+        return None
+    return [float(bx), float(by), float(bx + bw), float(by + bh)]
+
+
+def _covered(t: list[float], balloons: list[list[float]]) -> bool:
+    area = (t[2] - t[0]) * (t[3] - t[1])
+    for b in balloons:
+        iw = min(t[2], b[2]) - max(t[0], b[0])
+        ih = min(t[3], b[3]) - max(t[1], b[1])
+        if iw > 0 and ih > 0 and iw * ih >= COVERED_FRAC * area:
+            return True
+    return False
+
+
+def growth_items(texts, bubbles, image, sx: float, sy: float) -> list[tuple[list[float], float]]:
+    """What panels should grow over, as (box in page pixels, pad fraction) pairs.
+
+    - Whole balloons from the bubble model, padded slightly.
+    - Lettering not inside a detected balloon (from either model): the container around it
+      when one is found, else the lettering padded by TEXT_PAD_FRAC.
+    - Loose text (outside bubbles) only when it sits in a closed box, like a narration
+      caption. Bare loose text can be a sound effect drawn across panels, so it is skipped.
+    `texts` are page pixels; `bubbles` are (name, box) in `image` pixels.
+    """
+
+    def page(b):
+        return [b[0] * sx, b[1] * sy, b[2] * sx, b[3] * sy]
+
+    balloons = [page(b) for n, b in bubbles if n == "bubble"]
+    lettering = list(texts) + [page(b) for n, b in bubbles if n == "text_bubble"]
+    loose = [page(b) for n, b in bubbles if n == "text_free"]
+    items: list[tuple[list[float], float]] = [(b, BUBBLE_PAD_FRAC) for b in balloons]
+    comps = None
+
+    def container(t):
+        nonlocal comps
+        if comps is None:
+            comps = light_components(image)
+        c = find_container(*comps, [t[0] / sx, t[1] / sy, t[2] / sx, t[3] / sy])
+        return None if c is None else page(c)
+
+    for t in lettering:
+        if _covered(t, balloons):
+            continue
+        c = container(t)
+        items.append((c, BUBBLE_PAD_FRAC) if c else (t, TEXT_PAD_FRAC))
+    for t in loose:
+        if _covered(t, balloons):
+            continue
+        c = container(t)
+        if c:
+            items.append((c, BUBBLE_PAD_FRAC))
+    return items
+
+
+def postprocess(xyxy, cls, w: int, h: int, sx: float, sy: float, rtl: bool, bubbles=None, image=None) -> list[dict]:
+    """Class split, scale to original pixels, clamp, area filter, merge, grow panels over
+    spilling balloons, round, sort. Sorting runs on the final integer boxes so the app, which
+    re-sorts them for the reader's direction, gets exactly this order back.
+
+    `bubbles` is the bubble model's [(name, box)] for this page in decoded-image pixels, with
+    `image` the decoded page. None means --bubbles off: lettering plus padding only."""
     boxes: list[list[float]] = []
+    texts: list[list[float]] = []
     min_area = MIN_AREA_FRAC * w * h
     for (x1, y1, x2, y2), c in zip(xyxy, cls):
-        if int(c) != PANEL_CLASS:
+        if int(c) not in (PANEL_CLASS, TEXT_CLASS):
             continue
         x1, x2 = max(0.0, min(float(w), x1 * sx)), max(0.0, min(float(w), x2 * sx))
         y1, y2 = max(0.0, min(float(h), y1 * sy)), max(0.0, min(float(h), y2 * sy))
+        if int(c) == TEXT_CLASS:
+            texts.append([x1, y1, x2, y2])
+            continue
         if (x2 - x1) * (y2 - y1) < min_area:
             continue
         boxes.append([x1, y1, x2, y2])
     boxes = merge_overlapping(boxes)
     boxes = [b for b in boxes if (b[2] - b[0]) * (b[3] - b[1]) >= min_area]
-    boxes = reading_order(boxes, rtl)
-    out = []
+    if bubbles is None:
+        boxes = attach_text(boxes, texts, w, h)
+    else:
+        boxes = attach_boxes(boxes, growth_items(texts, bubbles, image, sx, sy), w, h)
+    ints: list[list[float]] = []
     for x1, y1, x2, y2 in boxes:
         ix1, iy1 = int(round(x1)), int(round(y1))
         ix2, iy2 = int(round(x2)), int(round(y2))
@@ -203,8 +372,8 @@ def postprocess(xyxy, cls, w: int, h: int, sx: float, sy: float, rtl: bool) -> l
         ix2, iy2 = max(0, min(w, ix2)), max(0, min(h, iy2))
         if ix2 - ix1 < 1 or iy2 - iy1 < 1:
             continue
-        out.append({"x": ix1, "y": iy1, "w": ix2 - ix1, "h": iy2 - iy1})
-    return out
+        ints.append([ix1, iy1, ix2, iy2])
+    return [{"x": x1, "y": y1, "w": x2 - x1, "h": y2 - y1} for x1, y1, x2, y2 in reading_order(ints, rtl)]
 
 
 # --------------------------------------------------------------------------- model
@@ -213,6 +382,12 @@ class Detector:
         import torch
         from ultralytics import YOLO
 
+        try:  # ultralytics sends usage analytics unless told not to; keep everything on this PC
+            from ultralytics.utils import SETTINGS
+
+            SETTINGS.update({"sync": False})
+        except Exception:  # noqa: BLE001
+            pass
         self.conf, self.imgsz, self.batch = conf, imgsz, max(1, batch)
         self.model_path = ensure_model()
         self.model = YOLO(str(self.model_path))
@@ -275,6 +450,49 @@ class Detector:
             return self._predict(images)
 
 
+class BubbleDetector:
+    """RT-DETR-v2 speech-bubble model (transformers). Returns, per image, (name, box) pairs in
+    that image's pixels, name being "bubble", "text_bubble" or "text_free". Follows the panel
+    detector's device, and falls back to CPU if the GPU fails."""
+
+    def __init__(self, device: str, threshold: float = BUBBLE_THRESHOLD):
+        import torch
+        from transformers import RTDetrImageProcessor, RTDetrV2ForObjectDetection
+
+        self.torch, self.threshold = torch, threshold
+        cache = str(MODEL_DIR / "hf")
+        self.proc = RTDetrImageProcessor.from_pretrained(BUBBLE_REPO, cache_dir=cache)
+        self.model = RTDetrV2ForObjectDetection.from_pretrained(BUBBLE_REPO, cache_dir=cache, use_safetensors=True)
+        self.model.eval()
+        self.names = {int(k): v for k, v in self.model.config.id2label.items()}
+        self.device = "cpu" if device == "cpu" else (f"cuda:{device}" if device.isdigit() else "cuda")
+        self.model.to(self.device)
+        log(f"bubbles: {BUBBLE_REPO} on {self.device}")
+
+    def _predict(self, images: list[Image.Image]):
+        torch = self.torch
+        with torch.no_grad():
+            inputs = self.proc(images=images, return_tensors="pt").to(self.device)
+            out = self.model(**inputs)
+            sizes = torch.tensor([(im.height, im.width) for im in images], device=self.device)
+            res = self.proc.post_process_object_detection(out, target_sizes=sizes, threshold=self.threshold)
+        return [
+            [(self.names[int(lab)], box) for box, lab in zip(r["boxes"].tolist(), r["labels"].tolist())]
+            for r in res
+        ]
+
+    def predict(self, images: list[Image.Image]):
+        try:
+            return self._predict(images)
+        except Exception as e:  # noqa: BLE001
+            if self.device == "cpu":
+                raise
+            log(f"WARNING: bubble model failed on GPU ({type(e).__name__}: {e}); retrying on CPU")
+            self.device = "cpu"
+            self.model.to("cpu")
+            return self._predict(images)
+
+
 def ensure_model() -> Path:
     path = MODEL_DIR / MODEL_FILE
     if path.is_file() and path.stat().st_size > 0:
@@ -319,7 +537,10 @@ class PageSource:
             self._zip = None
 
 
-def detect_pages(src: PageSource, det: Detector, rtl: bool) -> dict:
+def detect_pages(
+    src: PageSource, det: Detector, rtl: bool, bub: BubbleDetector | None = None, on_progress=None
+) -> dict:
+    """Detect every page. `on_progress(done, total)` is called after each batch."""
     pages: dict[str, dict] = {}
     names = src.names
     imgsz, bs = det.imgsz, det.batch
@@ -347,24 +568,38 @@ def detect_pages(src: PageSource, det: Detector, rtl: bool) -> dict:
                     pages[n] = {"w": 0, "h": 0, "panels": []}
             if not good:
                 continue
-            results = det.predict([d[1] for d in good])
-            for (n, im, ow, oh, _), res in zip(good, results):
+            images = [d[1] for d in good]
+            results = det.predict(images)
+            bubbles = bub.predict(images) if bub is not None else [None] * len(good)
+            for (n, im, ow, oh, _), res, bb in zip(good, results, bubbles):
                 dw, dh = im.size
                 sx, sy = ow / dw, oh / dh
                 b = res.boxes
                 xyxy = b.xyxy.cpu().numpy().tolist() if len(b) else []
                 cls = b.cls.cpu().numpy().tolist() if len(b) else []
-                pages[n] = {"w": ow, "h": oh, "panels": postprocess(xyxy, cls, ow, oh, sx, sy, rtl)}
+                panels = postprocess(xyxy, cls, ow, oh, sx, sy, rtl, bubbles=bb, image=im)
+                pages[n] = {"w": ow, "h": oh, "panels": panels}
+            if on_progress is not None:
+                on_progress(len(pages), len(names))
     # keep archive order
     return {n: pages[n] for n in names if n in pages}
 
 
-def build_json(pages: dict, conf: float, rtl: bool) -> str:
-    doc = {"version": 1, "rtl": rtl, "model": MODEL_REPO, "conf": conf, "pages": pages}
+def build_json(pages: dict, conf: float, rtl: bool, bubbles: str | None = None) -> str:
+    """`bubbles` names the bubble model used to grow panels, or None for lettering only."""
+    doc = {
+        "version": 1,
+        "rtl": rtl,
+        "text": True,
+        "bubbles": bubbles,
+        "model": MODEL_REPO,
+        "conf": conf,
+        "pages": pages,
+    }
     return json.dumps(doc, ensure_ascii=False, separators=(",", ":"))
 
 
-def rewrite_archive(path: Path, payload: bytes, overwrite: bool) -> None:
+def rewrite_archive(path: Path, payload: bytes, overwrite: bool, replace=os.replace) -> None:
     """Copy every entry (same compression type, same comment) into a temp zip next to the
     original, add/replace the JSON entry, then atomically replace the original."""
     fd, tmp_name = tempfile.mkstemp(prefix=".panelize-", suffix=".tmp", dir=str(path.parent))
@@ -391,7 +626,7 @@ def rewrite_archive(path: Path, payload: bytes, overwrite: bool) -> None:
             zi.compress_type = zipfile.ZIP_DEFLATED
             zi.external_attr = 0o644 << 16
             zout.writestr(zi, payload)
-        os.replace(tmp, path)
+        replace(tmp, path)  # the hub passes a replace that waits for readers of `path`
     finally:
         if tmp.exists():
             try:
@@ -432,7 +667,7 @@ def collect_jobs(paths: list[str]) -> list[Path]:
     return jobs
 
 
-def process(job: Path, det: Detector, args) -> tuple[int, int, int, float]:
+def process(job: Path, det: Detector, args, bub: BubbleDetector | None = None) -> tuple[int, int, int, float]:
     """Returns (pages, pages_with_panels, panels, seconds)."""
     if not job.exists():
         raise FileNotFoundError(str(job))
@@ -445,8 +680,9 @@ def process(job: Path, det: Detector, args) -> tuple[int, int, int, float]:
             log(f"skip (no image pages): {src.label}")
             return 0, 0, 0, 0.0
         t0 = time.perf_counter()
-        pages = detect_pages(src, det, rtl=not args.ltr)
-        text = build_json(pages, args.conf, rtl=not args.ltr)
+        on_progress = (lambda done, total: print(f"PROGRESS {done} {total}", flush=True)) if args.progress else None
+        pages = detect_pages(src, det, rtl=not args.ltr, bub=bub, on_progress=on_progress)
+        text = build_json(pages, args.conf, rtl=not args.ltr, bubbles=BUBBLE_REPO if bub else None)
         n_pages = len(pages)
         n_with = sum(1 for p in pages.values() if p["panels"])
         n_panels = sum(len(p["panels"]) for p in pages.values())
@@ -487,7 +723,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--batch", type=int, default=16, help="pages per inference batch (default 16)")
     ap.add_argument("--device", default="auto", help="auto | cpu | 0 (CUDA index)")
     ap.add_argument("--ltr", action="store_true", help="left-to-right reading order (default is manga RTL)")
+    ap.add_argument(
+        "--bubbles",
+        choices=("on", "off"),
+        default="on",
+        help="grow panels over spilling speech bubbles with the bubble model (default on)",
+    )
     ap.add_argument("--dry-run", action="store_true", help="detect and report, do not modify archives")
+    ap.add_argument("--progress", action="store_true", help=argparse.SUPPRESS)  # machine-readable, for the hub
     ap.add_argument("--json-out", metavar="DIR", help="also write <stem>.panels.json into DIR")
     args = ap.parse_args(argv)
 
@@ -503,13 +746,20 @@ def main(argv: list[str] | None = None) -> int:
         traceback.print_exc()
         return 2
 
+    bub: BubbleDetector | None = None
+    if args.bubbles == "on":
+        try:
+            bub = BubbleDetector(det.device)
+        except Exception as e:  # noqa: BLE001
+            log(f"WARNING: bubble model unavailable ({type(e).__name__}: {e}); growing panels over lettering only")
+
     tot_pages = tot_with = tot_panels = 0
     tot_secs = 0.0
     failures: list[tuple[Path, str]] = []
     done = 0
     for job in jobs:
         try:
-            p, w, n, s = process(job, det, args)
+            p, w, n, s = process(job, det, args, bub)
             if p:
                 done += 1
             tot_pages += p

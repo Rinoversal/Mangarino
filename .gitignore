@@ -48,3 +48,12 @@ tools/panelizer/models/
 .claude/
 local.properties
 __tests__/sample-dir.txt
+tools/panelizer/.venv/
+tools/panelizer/samples/
+tools/panelizer/compare/
+__pycache__/
+/build/
+Mangarino-Hub.spec
+
+# Written by the Hub EXE workflow
+tools/hub/mangarino_hub/_build.py

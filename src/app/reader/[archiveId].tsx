@@ -28,6 +28,7 @@ import { PagedReader, PagerHandle } from '@/reader/PagedReader';
 import { PanelHandle, PanelReader } from '@/reader/PanelReader';
 import { ChapterMark, ReaderChrome } from '@/reader/ReaderChrome';
 import { useReaderPages } from '@/store/reader';
+import { usePcSync } from '@/store/pcSync';
 import { ReaderMode, useSettings } from '@/store/settings';
 import { colors } from '@/ui/theme';
 
@@ -62,6 +63,8 @@ export default function ReaderScreen() {
   const modeRef = useRef<ReaderMode>('page');
   const historyRef = useRef<number | null>(null);
   const positionRef = useRef({ page: 0, panel: 0 });
+  const openedRef = useRef({ page: 0, panel: 0 }); // where this volume opened
+  const movedRef = useRef(false); // the reader has left that position: its saves are real reads
   const startRef = useRef(0);
   const lastPageRef = useRef(0);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -76,6 +79,11 @@ export default function ReaderScreen() {
     const a = archiveRef.current;
     if (!a) return;
     const { page, panel } = positionRef.current;
+    const opened = openedRef.current;
+    if (!movedRef.current && page === opened.page && (modeRef.current !== 'panel' || panel === opened.panel)) {
+      return; // nothing read: don't overwrite a newer position (from the PC) with this one
+    }
+    movedRef.current = true;
     const completed = page >= pagesRef.current.length - 1;
     void saveProgress(a.series_id, a.id, page, modeRef.current === 'panel' ? panel : null, completed);
   }, []);
@@ -128,6 +136,8 @@ export default function ReaderScreen() {
         archiveRef.current = a;
         pagesRef.current = p;
         positionRef.current = { page: start, panel };
+        openedRef.current = { page: start, panel };
+        movedRef.current = false;
         startRef.current = start;
         lastPageRef.current = start;
         loader.setCursor(start, 1);
@@ -149,6 +159,7 @@ export default function ReaderScreen() {
     return () => {
       cancelled = true;
       flushProgress();
+      setTimeout(() => void usePcSync.getState().backgroundSync(true), 1500); // after the save lands
       const h = historyRef.current;
       if (h !== null) {
         void closeHistory(h, positionRef.current.page, Math.abs(positionRef.current.page - startRef.current));
@@ -430,7 +441,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 60,
     alignSelf: 'center',
-    backgroundColor: colors.overlay,
+    backgroundColor: colors.scrim,
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 20,

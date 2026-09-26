@@ -12,10 +12,8 @@ import {
   upsertSeries,
 } from '@/db/repo';
 
+import { ARCHIVE_RE, folderImagesAreVolume, isArchiveName, isJunkName, isPageImage } from './layout';
 import { archiveSortKey, naturalCompare, normalizeSeriesKey, parseArchiveName } from './parse';
-
-const ARCHIVE_RE = /\.(cbz|zip)$/i;
-const IMAGE_RE = /\.(jpe?g|png|webp|gif|avif|bmp)$/i;
 
 export interface ScanProgress {
   phase: 'listing' | 'indexing' | 'covers' | 'done';
@@ -50,11 +48,15 @@ function filesOf(items: (Directory | File)[]): File[] {
 }
 
 function dirsOf(items: (Directory | File)[]): Directory[] {
-  return items.filter((x): x is Directory => x instanceof Directory && !x.name.startsWith('.'));
+  return items.filter((x): x is Directory => x instanceof Directory && !isJunkName(x.name));
 }
 
-function hasImages(items: (Directory | File)[]): boolean {
-  return filesOf(items).some((f) => IMAGE_RE.test(f.name));
+function archivesOf(items: (Directory | File)[]): File[] {
+  return filesOf(items).filter((f) => isArchiveName(f.name));
+}
+
+function imageCount(items: (Directory | File)[]): number {
+  return filesOf(items).filter((f) => isPageImage(f.name)).length;
 }
 
 function fileMeta(f: File): { size: number; mtime: number | null } {
@@ -121,6 +123,9 @@ function pushDirArchive(out: FoundArchive[], d: Directory, label: string, series
  *   root/<Series>/<Vol>/<Ch>/*.jpg       folder archive named "<Vol> <Ch>"
  *   root/<Series>/*.jpg                  the series folder itself is one archive
  *   root/*.cbz                           grouped by the series name parsed from the file name
+ * Only .cbz/.zip archives and page images count; everything else (text files, shortcuts,
+ * macOS `._` files and `__MACOSX` folders, Thumbs.db) is ignored. A few loose images next to
+ * volume or chapter folders are cover art, not a volume (see folderImagesAreVolume).
  */
 export function discoverArchives(rootUri: string): FoundArchive[] {
   const out: FoundArchive[] = [];
@@ -128,8 +133,7 @@ export function discoverArchives(rootUri: string): FoundArchive[] {
   if (!root.exists) return out;
   const items = safeList(root);
 
-  for (const f of filesOf(items)) {
-    if (!ARCHIVE_RE.test(f.name)) continue;
+  for (const f of archivesOf(items)) {
     const info = parseArchiveName(f.name);
     const title = info.series ?? f.name.replace(ARCHIVE_RE, '');
     pushArchiveFile(out, f, normalizeSeriesKey(title) || title.toLowerCase(), title);
@@ -139,20 +143,23 @@ export function discoverArchives(rootUri: string): FoundArchive[] {
     const seriesTitle = s.name;
     const seriesKey = normalizeSeriesKey(s.name) || s.name.toLowerCase();
     const sItems = safeList(s);
-    const archives = filesOf(sItems).filter((f) => ARCHIVE_RE.test(f.name));
+    const archives = archivesOf(sItems);
     for (const f of archives) pushArchiveFile(out, f, seriesKey, seriesTitle);
-    if (archives.length === 0 && hasImages(sItems)) pushDirArchive(out, s, s.name, seriesKey, seriesTitle);
+    const before = out.length;
 
     for (const d of dirsOf(sItems)) {
       const dItems = safeList(d);
-      for (const f of filesOf(dItems)) if (ARCHIVE_RE.test(f.name)) pushArchiveFile(out, f, seriesKey, seriesTitle);
-      if (hasImages(dItems)) {
+      for (const f of archivesOf(dItems)) pushArchiveFile(out, f, seriesKey, seriesTitle);
+      const chapters = dirsOf(dItems).filter((leaf) => imageCount(safeList(leaf)) > 0);
+      if (folderImagesAreVolume(imageCount(dItems), false, chapters.length > 0)) {
         pushDirArchive(out, d, d.name, seriesKey, seriesTitle);
         continue;
       }
-      for (const leaf of dirsOf(dItems)) {
-        if (hasImages(safeList(leaf))) pushDirArchive(out, leaf, `${d.name} ${leaf.name}`, seriesKey, seriesTitle);
-      }
+      for (const leaf of chapters) pushDirArchive(out, leaf, `${d.name} ${leaf.name}`, seriesKey, seriesTitle);
+    }
+
+    if (folderImagesAreVolume(imageCount(sItems), archives.length > 0, out.length > before)) {
+      pushDirArchive(out, s, s.name, seriesKey, seriesTitle);
     }
   }
   return out;

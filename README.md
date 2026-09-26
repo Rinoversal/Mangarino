@@ -9,11 +9,14 @@ Drop your CBZ files on the tablet, tap Rescan, read. Mangarino works out the ser
 chapters and page order from the file names, never copies or unpacks your archives, and saves
 your place per series and per volume. Bookmarks are one tap away.
 
-- **Download:** https://github.com/Rinoversal/Mangarino/releases/latest
+- **Download:** https://github.com/Rinoversal/Mangarino/releases/latest, or try the
+  [1.1.0 beta](https://github.com/Rinoversal/Mangarino/releases/tag/v1.1.0-beta.1) with the PC hub
 - **Details:** [TECHNICAL.md](TECHNICAL.md) explains how the reader gets pages out of a 500 MB zip
   without extracting it, and how panel mode works
 - **Panel tool:** [tools/panelizer](tools/panelizer/README.md) runs on your PC and writes panel
   boxes into each CBZ
+- **PC hub:** [tools/hub](tools/hub/README.md) shares your PC's manga with the app over Wi-Fi (or
+  from anywhere with Tailscale), and adds panels on the PC's graphics card
 
 ## Getting started
 
@@ -21,10 +24,12 @@ your place per series and per volume. Bookmarks are one tap away.
    that is what a sideloaded app looks like.
 2. Open Mangarino › Sources and grant **All files access**. The app needs it to read archives
    where they sit instead of copying 20 GB into its own folder.
-3. Connect the tablet to your PC and copy your archives into
-   `Internal storage › Mangarino › <series name> ›`. One folder per series, one CBZ per volume
-   or chapter.
-4. Back in the app, tap **Rescan**. Covers appear as each archive is indexed.
+3. Get your manga onto the device, either way:
+   - **Over Wi-Fi:** install [Mangarino Hub](tools/hub/README.md) on your PC, then tap **PC** in the
+     Library, tap your PC's name and click **Allow** on the PC.
+   - **By cable:** copy your archives into `Internal storage › Mangarino › <series name> ›`. One
+     folder per series, one CBZ, ZIP or folder of images per volume or chapter. Then tap **Rescan**.
+4. Covers appear as each archive is indexed.
 
 ## Reading
 
@@ -48,7 +53,9 @@ you can rename it from the series screen.
 
 Panel detection uses Leandro Narosky's
 [manga-panel-detector-yolo26n](https://huggingface.co/leoxs22/manga-panel-detector-yolo26n)
-(Apache-2.0), trained on the Manga109-s dataset by Aizawa et al. The app itself is
+(Apache-2.0), trained on the Manga109-s dataset by Aizawa et al., and ogkalu's
+[comic-text-and-bubble-detector](https://huggingface.co/ogkalu/comic-text-and-bubble-detector)
+(Apache-2.0) to keep speech bubbles inside their panels. The app itself is
 BSD-2-Clause, see [LICENSE](LICENSE).
 
 Mangarino 2026 - Made by Carterino, a Rinoversal project

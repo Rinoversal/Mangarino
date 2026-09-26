@@ -57,11 +57,98 @@ export function parsePanelsJson(text: string): PanelsDoc | null {
   }
 }
 
-export function parsePagePanels(json: string | null): PanelRect[] {
+/**
+ * Panel rects for one page. With `rtl` given, the panels are re-sorted into that reading
+ * order, so a volume panelized for manga still reads left to right in Western mode.
+ */
+export function parsePagePanels(json: string | null, rtl?: boolean): PanelRect[] {
   if (!json) return [];
+  let rects: PanelRect[];
   try {
-    return normRects(JSON.parse(json));
+    rects = normRects(JSON.parse(json));
   } catch {
     return [];
   }
+  return rtl === undefined ? rects : readingOrder(rects, rtl);
+}
+
+// ----------------------------------------------------------------------------- reading order
+// Port of reading_order() in tools/panelizer/panelize.py. Keep the two in step:
+// __tests__/panels.test.ts checks them against each other when Python is available.
+
+type Box = [number, number, number, number]; // x1, y1, x2, y2
+type Key = number[];
+
+const ROW_OVERLAP = 0.4;
+
+function cmpKey(a: Key, b: Key): number {
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1;
+  return 0;
+}
+
+/** Stable sort by a tuple key, like Python's sorted(key=...). */
+function sortBy<T>(items: T[], key: (t: T) => Key): T[] {
+  return items
+    .map((item, i) => ({ item, i, k: key(item) }))
+    .sort((a, b) => cmpKey(a.k, b.k) || a.i - b.i)
+    .map((d) => d.item);
+}
+
+function shareRow(a: Box, b: Box): boolean {
+  const overlap = Math.min(a[3], b[3]) - Math.max(a[1], b[1]);
+  const shorter = Math.min(a[3] - a[1], b[3] - b[1]);
+  return shorter > 0 && overlap >= ROW_OVERLAP * shorter;
+}
+
+function shareCol(a: Box, b: Box): boolean {
+  const overlap = Math.min(a[2], b[2]) - Math.max(a[0], b[0]);
+  const narrower = Math.min(a[2] - a[0], b[2] - b[0]);
+  return narrower > 0 && overlap >= ROW_OVERLAP * narrower;
+}
+
+/** Greedy clustering: a box joins the first group holding any box it matches; groups are then sorted. */
+function cluster(boxes: Box[], same: (a: Box, b: Box) => boolean, key: (g: Box[]) => Key): Box[][] {
+  const groups: Box[][] = [];
+  for (const b of boxes) {
+    const g = groups.find((grp) => grp.some((o) => same(b, o)));
+    if (g) g.push(b);
+    else groups.push([b]);
+  }
+  return sortBy(groups, key);
+}
+
+function orderBoxes(input: Box[], rtl: boolean): Box[] {
+  const boxes = sortBy(input, (r) => [r[1], r[0]]);
+  if (boxes.length <= 1) return boxes;
+  const rows = cluster(boxes, shareRow, (g) => [Math.min(...g.map((r) => r[1]))]);
+  const colKey = rtl
+    ? (g: Box[]) => [-Math.max(...g.map((r) => r[2])), Math.min(...g.map((r) => r[1]))]
+    : (g: Box[]) => [Math.min(...g.map((r) => r[0])), Math.min(...g.map((r) => r[1]))];
+  const boxKey = rtl ? (r: Box) => [-r[2], r[1]] : (r: Box) => [r[0], r[1]];
+  const ordered: Box[] = [];
+  for (const row of rows) {
+    if (row.length === 1) {
+      ordered.push(...row);
+      continue;
+    }
+    const cols = cluster(sortBy(row, boxKey), shareCol, colKey);
+    if (cols.length === 1 && rows.length === 1) {
+      ordered.push(...sortBy(row, boxKey));
+      continue;
+    }
+    for (const col of cols) {
+      if (col.length === 1 || col.length === boxes.length) ordered.push(...sortBy(col, boxKey));
+      else ordered.push(...orderBoxes(col, rtl));
+    }
+  }
+  return ordered;
+}
+
+/**
+ * Manga/comic reading order: rows top to bottom, then right to left (rtl) or left to right
+ * inside a row, with stacked column groups inside a row ordered recursively.
+ */
+export function readingOrder(rects: PanelRect[], rtl: boolean): PanelRect[] {
+  const boxes = rects.map((r): Box => [r.x, r.y, r.x + r.w, r.y + r.h]);
+  return orderBoxes(boxes, rtl).map(([x1, y1, x2, y2]) => ({ x: x1, y: y1, w: x2 - x1, h: y2 - y1 }));
 }

@@ -23,10 +23,9 @@ import {
 } from '@/zip/zipIndex';
 import { ZipArchive } from '@/zip/zipReader';
 
+import { isPageImage } from './layout';
 import { PanelsDoc, parsePanelsJson } from './panels';
-import { naturalCompare, parseEntryName } from './parse';
-
-const IMAGE_RE = /\.(jpe?g|png|webp|gif|avif|bmp)$/i;
+import { pageCompare, parseEntryName } from './parse';
 
 export interface IndexResult {
   pageCount: number;
@@ -38,7 +37,7 @@ async function indexCbz(archive: ArchiveRow): Promise<IndexResult> {
   const src = new FileHandleSource(archive.uri);
   try {
     const dir = await readCentralDirectory(src);
-    const images = dir.entries.filter(isImageEntry).sort((a, b) => naturalCompare(a.name, b.name));
+    const images = dir.entries.filter(isImageEntry).sort((a, b) => pageCompare(a.name, b.name));
     const panelsEntry = dir.entries.find(isPanelsEntry);
     let panels: PanelsDoc | null = null;
     if (panelsEntry) {
@@ -84,7 +83,7 @@ async function indexDir(archive: ArchiveRow): Promise<IndexResult> {
   const dir = new Directory(archive.uri);
   const items = dir.list();
   const files = items.filter((x): x is File => x instanceof File);
-  const images = files.filter((f) => IMAGE_RE.test(f.name)).sort((a, b) => naturalCompare(a.name, b.name));
+  const images = files.filter((f) => isPageImage(f.name)).sort((a, b) => pageCompare(a.name, b.name));
   const panelsFile = files.find((f) => f.name === PANELS_ENTRY_NAME);
   let panels: PanelsDoc | null = null;
   if (panelsFile) {

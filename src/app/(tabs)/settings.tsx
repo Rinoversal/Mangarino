@@ -3,8 +3,10 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { APP_NAME, HUB_NAME } from '@/brand';
 import { clearPageCache, pageCacheSizeBytes } from '@/cache/pageCache';
 import { PANEL_OUTLINE_SWATCHES, ReaderMode, ReadingDirection, useSettings } from '@/store/settings';
+import { readableColumn, useLayout } from '@/ui/layout';
 import { colors, radius, spacing } from '@/ui/theme';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -16,10 +18,26 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function Row({ label, hint, children }: { label: string; hint?: string; children?: React.ReactNode }) {
+/**
+ * One settings row: label and hint on the left, control on the right. A `wide` control (button
+ * groups, swatches) drops below the label on phone-width screens instead of squeezing it.
+ */
+function Row({
+  label,
+  hint,
+  wide,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  wide?: boolean;
+  children?: React.ReactNode;
+}) {
+  const { compact } = useLayout();
+  const stacked = wide && compact;
   return (
-    <View style={styles.row}>
-      <View style={styles.rowText}>
+    <View style={[styles.row, stacked && styles.rowStacked]}>
+      <View style={[styles.rowText, stacked && styles.rowTextStacked]}>
         <Text style={styles.label}>{label}</Text>
         {hint ? <Text style={styles.hint}>{hint}</Text> : null}
       </View>
@@ -60,8 +78,9 @@ function Swatches({
   options: { value: string; label: string }[];
   onChange: (v: string) => void;
 }) {
+  const { compact } = useLayout();
   return (
-    <View style={styles.swatches}>
+    <View style={[styles.swatches, !compact && styles.swatchesBeside]}>
       {options.map((o) => {
         const active = o.value.toLowerCase() === value.toLowerCase();
         return (
@@ -95,11 +114,11 @@ export default function SettingsScreen() {
 
   return (
     <SafeAreaView style={styles.root} edges={['top', 'left', 'right']}>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView contentContainerStyle={[styles.content, readableColumn]}>
         <Text style={styles.h1}>Settings</Text>
 
         <Section title="Reading">
-          <Row label="Reading direction" hint="Manga reads right to left, Western comics left to right. Swipes and tap zones follow this.">
+          <Row wide label="Reading direction" hint="Manga reads right to left, Western comics left to right. Swipes and tap zones follow this.">
             <Segmented<ReadingDirection>
               value={settings.readingDirection}
               options={[
@@ -109,7 +128,7 @@ export default function SettingsScreen() {
               onChange={(v) => void set('readingDirection', v)}
             />
           </Row>
-          <Row label="Default mode" hint="Panels needs archives processed by the Mangarino panelizer on your PC.">
+          <Row wide label="Default mode" hint={`Panels needs volumes that went through ${HUB_NAME} on your PC.`}>
             <Segmented<ReaderMode>
               value={settings.defaultMode === 'vertical' ? 'page' : settings.defaultMode}
               options={[
@@ -119,7 +138,7 @@ export default function SettingsScreen() {
               onChange={(v) => void set('defaultMode', v)}
             />
           </Row>
-          <Row label="Panel outline" hint="Colour of the box drawn around the current panel in panel mode.">
+          <Row wide label="Panel outline" hint="Colour of the box drawn around the current panel in panel mode.">
             <Swatches value={settings.panelOutline} options={PANEL_OUTLINE_SWATCHES} onChange={(v) => void set('panelOutline', v)} />
           </Row>
           <Row label="Tap zones" hint="Tap the left or right third of the screen to turn pages. Centre shows the controls.">
@@ -134,7 +153,7 @@ export default function SettingsScreen() {
         </Section>
 
         <Section title="Storage">
-          <Row label="Page cache limit" hint="Extracted pages are kept on disk so re-reading is instant.">
+          <Row wide label="Page cache limit" hint="Extracted pages are kept on disk so re-reading is instant.">
             <Segmented<string>
               value={String(settings.cacheCapMB)}
               options={[
@@ -164,7 +183,10 @@ export default function SettingsScreen() {
         </Section>
 
         <Section title="About">
-          <Row label="Mangarino" hint="Reads CBZ and image folders in place. Panel detection by the Mangarino panelizer (YOLO26n model by Leandro Narosky, trained on Manga109-s). Made by Carterino, Rinoversal." />
+          <Row
+            label={APP_NAME}
+            hint={`Reads CBZ and image folders in place. Panel detection by the ${APP_NAME} panelizer (YOLO26n model by Leandro Narosky, trained on Manga109-s). Made by Carterino, Rinoversal.`}
+          />
         </Section>
       </ScrollView>
     </SafeAreaView>
@@ -179,15 +201,18 @@ const styles = StyleSheet.create({
   sectionTitle: { color: colors.muted, fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1 },
   card: { backgroundColor: colors.card, borderRadius: radius.lg, overflow: 'hidden' },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md, padding: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+  rowStacked: { flexDirection: 'column', alignItems: 'flex-start', gap: spacing.sm },
   rowText: { flex: 1, gap: 2 },
+  rowTextStacked: { flex: 0, alignSelf: 'stretch' },
   label: { color: colors.text, fontSize: 16 },
   hint: { color: colors.muted, fontSize: 12, lineHeight: 16 },
-  segmented: { flexDirection: 'row', backgroundColor: colors.bg, borderRadius: radius.md, padding: 3 },
+  segmented: { flexDirection: 'row', flexWrap: 'wrap', backgroundColor: colors.bg, borderRadius: radius.md, padding: 3 },
   segment: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: radius.sm },
   segmentActive: { backgroundColor: colors.accent },
   segmentText: { color: colors.muted, fontWeight: '600', fontSize: 13 },
   segmentTextActive: { color: colors.accentText },
-  swatches: { width: 136, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8 },
+  swatches: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  swatchesBeside: { width: 136, justifyContent: 'flex-end' },
   swatchRing: { width: 28, height: 28, borderRadius: 14, borderWidth: 2, borderColor: 'transparent', alignItems: 'center', justifyContent: 'center' },
   swatchRingActive: { borderColor: colors.text },
   swatch: { width: 20, height: 20, borderRadius: 10, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },

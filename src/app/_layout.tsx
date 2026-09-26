@@ -2,11 +2,13 @@ import { DarkTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { AppState, StyleSheet, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
+import { APP_NAME } from '@/brand';
 import { initDb } from '@/db';
 import { useLibrary } from '@/store/library';
+import { usePcSync } from '@/store/pcSync';
 import { useSettings } from '@/store/settings';
 import { colors } from '@/ui/theme';
 
@@ -48,6 +50,29 @@ export default function RootLayout() {
     };
   }, []);
 
+  // Reading progress follows you between this device and your PC, and while the app is open the
+  // PC can see this library and get volumes from it (when paired and reachable).
+  useEffect(() => {
+    if (!ready || error) return;
+    const pc = usePcSync.getState();
+    void pc.backgroundSync();
+    pc.startRemote();
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        void usePcSync.getState().backgroundSync();
+        usePcSync.getState().startRemote();
+      } else {
+        usePcSync.getState().stopRemote();
+        // After the reader's pending save lands: the PC should see where you stopped.
+        setTimeout(() => void usePcSync.getState().backgroundSync(true), 700);
+      }
+    });
+    return () => {
+      sub.remove();
+      usePcSync.getState().stopRemote();
+    };
+  }, [ready, error]);
+
   if (!ready) return null;
 
   return (
@@ -56,7 +81,7 @@ export default function RootLayout() {
         <StatusBar style="light" />
         {error ? (
           <View style={styles.errorBox}>
-            <Text style={styles.errorTitle}>Mangarino could not start</Text>
+            <Text style={styles.errorTitle}>{APP_NAME} could not start</Text>
             <Text style={styles.errorText}>{error}</Text>
           </View>
         ) : (
@@ -64,6 +89,7 @@ export default function RootLayout() {
             <Stack.Screen name="(tabs)" />
             <Stack.Screen name="series/[seriesId]" />
             <Stack.Screen name="sources" />
+            <Stack.Screen name="pc" />
             <Stack.Screen name="reader/[archiveId]" options={{ animation: 'fade' }} />
           </Stack>
         )}

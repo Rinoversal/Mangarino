@@ -1,0 +1,115 @@
+# Builds Mangarino Hub for Windows: the app (PyInstaller, no console) inside an installer
+# (Inno Setup), attached to a GitHub release. Runs when the hub changes, or by hand; by hand it
+# can also build Testarino Hub, the public test edition.
+name: Hub EXE
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/hub/**'
+      - '!tools/hub/tests/**'
+      - '!tools/hub/**.md'
+      - 'tools/panelizer/panelize.py'
+  workflow_dispatch:
+    inputs:
+      brand:
+        description: 'Edition to build'
+        type: choice
+        options: [Mangarino, Testarino]
+        default: Mangarino
+      release:
+        description: 'Attach to this existing release (its tag, like v1.1.0) instead of making a test build'
+        type: string
+        default: ''
+
+permissions:
+  contents: write
+
+env:
+  BRAND: ${{ inputs.brand || 'Mangarino' }}
+
+concurrency:
+  group: hub-exe-${{ github.ref }}-${{ inputs.brand || 'Mangarino' }}
+  cancel-in-progress: true
+
+jobs:
+  exe:
+    # Pushes make test builds only in the private repo; public releases are picked by hand.
+    if: github.event_name == 'workflow_dispatch' || github.event.repository.private
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install build tools
+        run: python -m pip install --disable-pip-version-check pyinstaller -r tools/hub/requirements.txt
+
+      - name: Test the hub
+        run: python -m unittest discover -s tools/hub/tests
+
+      - name: Stamp the build number and edition
+        shell: bash
+        run: |
+          echo "BUILD = ${{ github.run_number }}" > tools/hub/mangarino_hub/_build.py
+          if [ "$BRAND" != "Mangarino" ]; then echo "NAME = \"$BRAND\"" > tools/hub/mangarino_hub/_brand.py; fi
+
+      - name: Version details and installer pictures
+        run: python tools/hub/installer/prepare.py ${{ github.run_number }}
+
+      # --windowed: a Windows app with its own window and tray icon, no console.
+      # --onedir: installed as a folder, so it starts quickly and antivirus has less to object to.
+      - name: Build the app
+        shell: bash
+        run: >-
+          pyinstaller --noconfirm --onedir --windowed --name "$BRAND Hub"
+          --icon tools/hub/mangarino-hub.ico --version-file build/version_info.txt
+          --paths tools/hub --add-data "tools/hub/web;web" --exclude-module tkinter
+          --hidden-import pystray._win32
+          tools/hub/hub.py
+
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --yes --no-progress
+          }
+          $guid = if ($env:BRAND -eq 'Testarino') { '489103B9-1AFA-4FB5-A4F9-E0793A474882' } else { '7AF0DF96-AFB3-41E9-92E1-FE9D619F5AB6' }
+          $version = (Get-Content build/version.txt -Raw).Trim()
+          $root = (Get-Location).Path
+          & $iscc /Qp "/DBrand=$env:BRAND" "/DAppGuid=$guid" "/DAppVersion=$version" "/DBuildDir=$root\build" "/DDistDir=$root\dist\$env:BRAND Hub" "/DOutDir=$root\dist" tools/hub/installer/mangarino-hub.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-Item "dist/$env:BRAND-Hub-Setup.exe" | Format-List Name, Length
+
+      - name: Keep the installer as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BRAND }}-Hub-Setup-${{ github.run_number }}
+          path: dist/${{ env.BRAND }}-Hub-Setup.exe
+
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE: ${{ inputs.release }}
+        run: |
+          if [ -n "$RELEASE" ]; then
+            gh release upload "$RELEASE" "dist/$BRAND-Hub-Setup.exe" --clobber
+            exit 0
+          fi
+          if [ "$BRAND" = "Mangarino" ]; then tag="hub-${{ github.run_number }}"; else tag="${BRAND,,}-hub-${{ github.run_number }}"; fi
+          gh release create "$tag" "dist/$BRAND-Hub-Setup.exe" \
+            --title "$BRAND Hub ${{ github.run_number }} (Windows, ${GITHUB_SHA::7})" \
+            --prerelease \
+            --notes "$BRAND Hub for Windows. Download $BRAND-Hub-Setup.exe, run it, and click Install. Windows then asks whether to let it make changes: click Yes. Setup uses that once, to let your devices reach the hub through Windows Firewall, so there's no firewall question later. It adds $BRAND Hub to the Start menu and replaces an older one that's still running.
+
+          Setup isn't signed yet, so Windows may say \"Windows protected your PC\" when you run it: click More info, then Run anyway. That happens once, for the setup; the installed app opens without it.
+
+          To connect a device: in $BRAND, tap PC, tap your PC's name, then choose Allow on the PC.
+
+          Built from ${{ github.sha }}."
