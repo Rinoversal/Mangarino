@@ -157,7 +157,7 @@ class DiscoveryTest(unittest.TestCase):
         self.assertEqual(read_dir_panels_state(folder), "none")
         (folder / "mangarino-panels.json").write_text(json.dumps({"pages": {}}))
         self.assertEqual(read_dir_panels_state(folder), "old")
-        (folder / "mangarino-panels.json").write_text(json.dumps({"bubbles": "m", "pages": {}}))
+        (folder / "mangarino-panels.json").write_text(json.dumps({"bubbles": "m", "growth": 2, "pages": {}}))
         self.assertEqual(read_dir_panels_state(folder), "ready")
 
 
@@ -207,7 +207,7 @@ class PackerTest(unittest.TestCase):
             for i in (1, 2, 10, 3):
                 img(folder / f"p{i}.jpg", 500 + i)
             img(folder / "ページ.jpg")  # a non-ASCII name
-            (folder / "mangarino-panels.json").write_text(json.dumps({"bubbles": "m", "pages": {}}))
+            (folder / "mangarino-panels.json").write_text(json.dumps({"bubbles": "m", "growth": 2, "pages": {}}))
             touch_old(root)
             lib = Library(str(root))
             lib.scan()

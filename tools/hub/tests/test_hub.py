@@ -47,7 +47,7 @@ class HubTest(unittest.TestCase):
         self.lib = base / "Manga"
         (self.lib / "Berserk").mkdir(parents=True)
         self.v01 = make_cbz(self.lib / "Berserk" / "Berserk v01.cbz")
-        make_cbz(self.lib / "Berserk" / "Berserk v02.cbz", panels={"bubbles": "m", "pages": {}})
+        make_cbz(self.lib / "Berserk" / "Berserk v02.cbz", panels={"bubbles": "m", "growth": 2, "pages": {}})
         make_cbz(self.lib / "Loose v01.cbz", panels={"text": True, "pages": {}})
         old = time.time() - 3600  # untouched for an hour, so complete
         for p in self.lib.rglob("*.cbz"):
@@ -320,7 +320,7 @@ class PiecesTest(unittest.TestCase):
                 pages = {n: z.read(n) for n in z.namelist() if n.endswith(".jpg")}
             self.assertFalse(add_panels_entry(f, b"{}", "0-0", FileGate().replace))  # not that version
             self.assertEqual(read_panels_state(f), "old")
-            self.assertTrue(add_panels_entry(f, b'{"bubbles": "m", "pages": {}}', file_version(f), FileGate().replace))
+            self.assertTrue(add_panels_entry(f, b'{"bubbles": "m", "growth": 2, "pages": {}}', file_version(f), FileGate().replace))
             with zipfile.ZipFile(f) as z:
                 self.assertEqual({n: z.read(n) for n in z.namelist() if n.endswith(".jpg")}, pages)
                 self.assertEqual(z.namelist().count("mangarino-panels.json"), 1)
@@ -335,7 +335,7 @@ assert "--dry-run" in args and "--overwrite" in args, args
 print("PROGRESS 1 3", flush=True)
 time.sleep(1.5)
 out = Path(args[args.index("--json-out") + 1])
-(out / (Path(args[0]).stem + ".panels.json")).write_text(json.dumps({"bubbles": "test", "pages": {}}))
+(out / (Path(args[0]).stem + ".panels.json")).write_text(json.dumps({"bubbles": "test", "growth": 2, "pages": {}}))
 '''
         with tempfile.TemporaryDirectory() as d:
             d = Path(d)
@@ -382,9 +382,10 @@ out = Path(args[args.index("--json-out") + 1])
             d = Path(d)
             make_cbz(d / "a.cbz")
             make_cbz(d / "b.cbz", panels={"pages": {}})
-            make_cbz(d / "c.cbz", panels={"bubbles": "m", "pages": {}})
+            make_cbz(d / "c.cbz", panels={"bubbles": "m", "growth": 2, "pages": {}})
             (d / "d.cbz").write_bytes(b"nope")
-            self.assertEqual([read_panels_state(d / f"{n}.cbz") for n in "abcd"], ["none", "old", "ready", "bad"])
+            make_cbz(d / "e.cbz", panels={"bubbles": "m", "pages": {}})  # before balloons across gutters
+            self.assertEqual([read_panels_state(d / f"{n}.cbz") for n in "abcde"], ["none", "old", "ready", "bad", "old"])
 
     def test_gate_replace_waits_for_readers_and_blocks_new_ones(self):
         with tempfile.TemporaryDirectory() as d:

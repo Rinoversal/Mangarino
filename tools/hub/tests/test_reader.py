@@ -86,7 +86,7 @@ class ReaderEndpointsTest(unittest.TestCase):
             z.writestr("p2.jpg", b"\xff\xd8page2\xff\xd9")
             z.writestr("__MACOSX/._p2.jpg", b"junk")
             z.writestr("notes.txt", b"not a page")
-            z.writestr("mangarino-panels.json", json.dumps({"bubbles": "m", "pages": {
+            z.writestr("mangarino-panels.json", json.dumps({"bubbles": "m", "growth": 2, "pages": {
                 "p2.jpg": {"w": 100, "h": 150, "panels": [{"x": 1, "y": 2, "w": 30, "h": 40}]}}}))
         (lib / "Oneshot").mkdir()
         for n in (1, 2, 3, 4, 5):

@@ -9,8 +9,8 @@ Drop your CBZ files on the tablet, tap Rescan, read. Mangarino works out the ser
 chapters and page order from the file names, never copies or unpacks your archives, and saves
 your place per series and per volume. Bookmarks are one tap away.
 
-- **Download:** https://github.com/Rinoversal/Mangarino/releases/latest, or try the
-  [1.1.0 beta](https://github.com/Rinoversal/Mangarino/releases/tag/v1.1.0-beta.2) with the PC hub
+- **Download:** https://github.com/Rinoversal/Mangarino/releases/latest: the app, and Mangarino Hub
+  for your PC
 - **Details:** [TECHNICAL.md](TECHNICAL.md) explains how the reader gets pages out of a 500 MB zip
   without extracting it, and how panel mode works
 - **Panel tool:** [tools/panelizer](tools/panelizer/README.md) runs on your PC and writes panel

@@ -103,9 +103,12 @@ grow over come from three places:
 - **Loose text** (class `text_free`) only when it sits in a closed container, like a narration
   caption. Bare loose text may be a sound effect drawn across panels, so it is skipped.
 
-Each box goes to the panel holding the largest share of it, if that share is at least 15%. When
-the box pokes out of that panel by more than 0.5% of the page width, the panel becomes its union
-with the padded box. Boxes wholly inside a panel, or outside every panel, change nothing.
+Each box goes to the panel holding the largest share of it, if that share is at least 15%, and
+also to a panel beside that one (in the same row) holding at least 30% of it, so a balloon across
+the gutter between two panels side by side is whole in both. When the box pokes out of a panel
+it goes to by more than 0.5% of the page width, the panel becomes its union with the padded box.
+The file records these rules' revision (`growth`), and Mangarino Hub redoes volumes made with
+older ones. Boxes wholly inside a panel, or outside every panel, change nothing.
 With `--bubbles off`, only the panel model's lettering boxes are used, padded by 2%.
 
 Boxes are rounded to integer pixels and sorted into reading order. The app re-sorts them with

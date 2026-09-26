@@ -51,6 +51,18 @@ class AttachBoxesTest(unittest.TestCase):
         self.assertEqual(out[0], a)  # 40 px of it in A
         self.assertEqual(out[1], [440, 0, 1000, 500])  # 100 px of it in B
 
+    def test_balloon_across_a_gutter_is_whole_in_both_panels_side_by_side(self):
+        a, b = [0, 0, 480, 500], [520, 0, 1000, 500]
+        out = pz.attach_boxes([a, b], [([400, 100, 640, 200], 0.0)], W, H)
+        self.assertEqual(out[0], [0, 0, 640, 500])  # 80 px (a third) of it in A
+        self.assertEqual(out[1], [400, 0, 1000, 500])  # 120 px in B
+
+    def test_balloon_across_a_gutter_between_stacked_panels_stays_with_one(self):
+        top, bottom = [0, 0, 1000, 480], [0, 520, 1000, 1000]
+        out = pz.attach_boxes([top, bottom], [([300, 400, 500, 640], 0.0)], W, H)
+        self.assertEqual(out[0], top)  # 80 px of it in the top panel: rows stay apart
+        self.assertEqual(out[1], [0, 400, 1000, 1000])  # 120 px in the bottom one
+
     def test_growth_is_clamped_to_the_page(self):
         out = pz.attach_boxes([[600, 100, 990, 600]], [([900, 200, 1000, 300], 0.02)], W, H)
         self.assertEqual(out[0][2], float(W))

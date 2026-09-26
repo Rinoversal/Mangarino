@@ -49,6 +49,8 @@ MERGE_IOU = 0.7  # merge boxes overlapping more than this (keep the union)
 ROW_OVERLAP = 0.40  # vertical overlap (of the shorter box) needed to share a row
 TEXT_ATTACH_MIN = 0.15  # a text box belongs to a panel when at least this much of it lies inside
 TEXT_SPILL_FRAC = 0.005  # ...and it pokes out of that panel by more than this (of page width)
+TEXT_SHARE_MIN = 0.30  # a panel beside it holding this much of a balloon grows over it too
+GROWTH = 2  # the growth rules' revision, stored in the file: the hub redoes volumes made with older ones
 TEXT_PAD_FRAC = 0.02  # text boxes hug the lettering; pad them (of page width) to take in the balloon
 BUBBLE_REPO = "ogkalu/comic-text-and-bubble-detector"
 BUBBLE_THRESHOLD = 0.3  # RT-DETR score cut-off
@@ -200,11 +202,14 @@ def attach_boxes(panels: list[list[float]], items: list[tuple[list[float], float
 
     `items` are (box, pad) pairs in page pixels, the pad being a fraction of the page width.
     Every box is given to the panel holding the largest share of it (at least
-    TEXT_ATTACH_MIN of the box's area). If the box pokes out of that panel by more than
-    TEXT_SPILL_FRAC of the page width, the panel becomes the union with the padded box.
-    Boxes wholly inside their panel, or outside every panel, change nothing. Growth is
-    measured against the original panels, so one expansion never pulls in another panel's
-    balloons.
+    TEXT_ATTACH_MIN of the box's area), and also to any panel beside that one (sharing its row)
+    holding at least TEXT_SHARE_MIN: a balloon across the gutter between two panels side by
+    side is then whole in both. Between stacked panels it stays with the one holding most of
+    it, because growing both would merge their rows and upset the reading order. If the box
+    pokes out of a panel it's given to by more than TEXT_SPILL_FRAC of the page width, the
+    panel becomes the union with the padded box. Boxes wholly inside their panel, or outside
+    every panel, change nothing. Growth is measured against the original panels, so one
+    expansion never pulls in another panel's balloons.
     """
     if not panels or not items:
         return panels
@@ -214,23 +219,29 @@ def attach_boxes(panels: list[list[float]], items: list[tuple[list[float], float
         area = (t[2] - t[0]) * (t[3] - t[1])
         if area <= 0:
             continue
-        best, best_frac = -1, 0.0
+        shares = []
         for i, p in enumerate(panels):
             iw = min(t[2], p[2]) - max(t[0], p[0])
             ih = min(t[3], p[3]) - max(t[1], p[1])
-            if iw > 0 and ih > 0 and iw * ih / area > best_frac:
-                best, best_frac = i, iw * ih / area
-        if best < 0 or best_frac < TEXT_ATTACH_MIN:
+            if iw > 0 and ih > 0:
+                shares.append((iw * ih / area, i))
+        if not shares:
             continue
-        p = panels[best]
-        if t[0] >= p[0] - spill and t[1] >= p[1] - spill and t[2] <= p[2] + spill and t[3] <= p[3] + spill:
+        best_frac, best = max(shares)
+        if best_frac < TEXT_ATTACH_MIN:
             continue
         pad = pad_frac * w
-        o = out[best]
-        o[0] = max(0.0, min(o[0], t[0] - pad))
-        o[1] = max(0.0, min(o[1], t[1] - pad))
-        o[2] = min(float(w), max(o[2], t[2] + pad))
-        o[3] = min(float(h), max(o[3], t[3] + pad))
+        for frac, i in shares:
+            if i != best and (frac < TEXT_SHARE_MIN or not share_row(panels[best], panels[i])):
+                continue
+            p = panels[i]
+            if t[0] >= p[0] - spill and t[1] >= p[1] - spill and t[2] <= p[2] + spill and t[3] <= p[3] + spill:
+                continue
+            o = out[i]
+            o[0] = max(0.0, min(o[0], t[0] - pad))
+            o[1] = max(0.0, min(o[1], t[1] - pad))
+            o[2] = min(float(w), max(o[2], t[2] + pad))
+            o[3] = min(float(h), max(o[3], t[3] + pad))
     return out
 
 
@@ -592,6 +603,7 @@ def build_json(pages: dict, conf: float, rtl: bool, bubbles: str | None = None) 
         "rtl": rtl,
         "text": True,
         "bubbles": bubbles,
+        "growth": GROWTH,
         "model": MODEL_REPO,
         "conf": conf,
         "pages": pages,

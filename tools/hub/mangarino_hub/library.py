@@ -101,9 +101,15 @@ def _is_link(entry: os.DirEntry) -> bool:
     return bool(attrs & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
 
 
+GROWTH = 2  # panelize.py's growth rules: files made with older ones are redone
+
+
 def _state_of(raw: bytes) -> str:
     doc = json.loads(raw.decode("utf-8"))
-    return "ready" if isinstance(doc, dict) and doc.get("bubbles") else "old"
+    if not isinstance(doc, dict) or not doc.get("bubbles"):
+        return "old"
+    growth = doc.get("growth")
+    return "ready" if isinstance(growth, int) and growth >= GROWTH else "old"
 
 
 def read_panels_state(path: Path) -> str:

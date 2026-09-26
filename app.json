@@ -2,7 +2,7 @@
   "expo": {
     "name": "Mangarino",
     "slug": "mangarino",
-    "version": "1.1.0-beta.2",
+    "version": "1.1.0",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "mangarino",
@@ -10,7 +10,7 @@
     "backgroundColor": "#08153b",
     "android": {
       "package": "com.rinoversal.mangarino",
-      "versionCode": 4,
+      "versionCode": 5,
       "adaptiveIcon": {
         "backgroundColor": "#08153b",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
