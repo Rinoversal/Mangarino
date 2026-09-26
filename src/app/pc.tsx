@@ -1,16 +1,16 @@
 import { Image } from 'expo-image';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, Easing, Pressable, SectionList, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { APP_NAME, BRAND_HUB_PORT, HUB_NAME } from '@/brand';
+import { APP_NAME, APP_SCHEME, BRAND_HUB_PORT, HUB_NAME } from '@/brand';
 import { archiveLabel, parseArchiveName } from '@/library/parse';
 import { PcLink, authHeaders, coverUrl } from '@/pc/api';
 import { CopyMode } from '@/pc/copyPlan';
 import { FoundHub } from '@/pc/discover';
 import { DeviceVolume, MatchedVolume, PcSeries, deviceOnly, matchPcSeries, updateReason } from '@/pc/match';
-import { formatBytes, parseManualAddress } from '@/pc/net';
+import { formatBytes, parseManualAddress, parsePairLink } from '@/pc/net';
 import { QrScanModal } from '@/pc/QrScanModal';
 import { TransferJob, usePcSync } from '@/store/pcSync';
 import { Icon } from '@/ui/Icon';
@@ -250,7 +250,7 @@ function FindCard() {
         <View style={styles.tips}>
           <Text style={styles.tip}>• Install it with {APP_NAME}-Hub-Setup.exe, then open it from the Start menu.</Text>
           <Text style={styles.tip}>• Keep this device and the PC on the same Wi-Fi.</Text>
-          <Text style={styles.tip}>• Still hidden? In {HUB_NAME} open Settings and choose Fix firewall.</Text>
+          <Text style={styles.tip}>• Still hidden? In {HUB_NAME} open Settings: if Network access shows Allow devices, click it.</Text>
         </View>
         <Button title="Search again" kind="accent" icon="refresh" onPress={() => void search()} />
       </View>
@@ -285,7 +285,7 @@ function ConnectedCard() {
   const panelText =
     panels && panels.state === 'working'
       ? `Adding panels on the PC · ${panels.queued} waiting`
-      : panels && panels.queued > 0 && panels.state !== 'off'
+      : panels && panels.queued > 0 && ['starting', 'loading', 'paused'].includes(panels.state)
         ? `${panels.queued} volumes waiting for panels on the PC`
         : '';
   return (
@@ -508,7 +508,7 @@ function OtherWays() {
 
 function TransfersCard() {
   const jobs = usePcSync((s) => s.jobs);
-  const { cancel, clearFinished } = usePcSync.getState();
+  const { cancel, cancelAll, clearFinished } = usePcSync.getState();
   if (jobs.length === 0) return null;
   const running = jobs.find((j) => j.state === 'running');
   const queued = jobs.filter((j) => j.state === 'queued').length;
@@ -537,7 +537,10 @@ function TransfersCard() {
           <Text style={styles.faint}>Keep {APP_NAME} open until it finishes.</Text>
         </View>
       ) : (
-        <Text style={styles.text}>{queued ? `${queued} waiting…` : 'Transfers finished.'}</Text>
+        <View style={styles.spread}>
+          <Text style={[styles.text, styles.flex]}>{queued ? `${queued} waiting…` : 'Transfers finished.'}</Text>
+          {queued ? <Button title="Cancel all" small kind="quiet" onPress={cancelAll} /> : null}
+        </View>
       )}
       {failed.slice(0, 3).map((j) => (
         <Text key={j.key} style={styles.error}>
@@ -568,12 +571,26 @@ function JobChip({ job, onRetry }: { job: TransferJob; onRetry: () => void }) {
     );
   }
   if (job.state === 'failed') return <Button title="Retry" small onPress={onRetry} />;
-  if (job.state === 'done') return <Text style={styles.ok}>{job.note ?? 'Done'}</Text>;
+  if (job.state === 'done') return <Text style={styles.ok}>{job.settling ? 'Adding to your library…' : (job.note ?? 'Done')}</Text>;
   return null;
 }
 
 // ---------------------------------------------------------------------------- the screen
 export default function PcScreen() {
+  // Opened from the hub's QR code with the phone's own camera app: APP_SCHEME://pc?h=…&c=…
+  const params = useLocalSearchParams<{ h?: string; c?: string; p?: string; t?: string }>();
+  const linkQuery = (['h', 'c', 'p', 't'] as const)
+    .filter((k) => typeof params[k] === 'string' && params[k])
+    .map((k) => `${k}=${encodeURIComponent(String(params[k]))}`)
+    .join('&');
+  const linkUsed = useRef('');
+  useEffect(() => {
+    if (!linkQuery || linkUsed.current === linkQuery) return;
+    linkUsed.current = linkQuery; // once per link
+    const p = parsePairLink(`${APP_SCHEME}://pc?${linkQuery}`, BRAND_HUB_PORT);
+    if (p) void usePcSync.getState().pairFromLink(p);
+  }, [linkQuery]);
+
   const phase = usePcSync((s) => s.phase);
   const link = usePcSync((s) => s.link);
   const via = usePcSync((s) => s.via);
@@ -657,7 +674,7 @@ export default function PcScreen() {
 
   const header = (
     <View style={styles.headerWrap}>
-      <Pressable onPress={() => router.back()} style={styles.back} hitSlop={8}>
+      <Pressable onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))} style={styles.back} hitSlop={8}>
         <Icon name="arrow_back" size={20} color={colors.accentSoft} />
         <Text style={styles.backText}>Library</Text>
       </Pressable>
@@ -694,6 +711,8 @@ export default function PcScreen() {
         ListHeaderComponent={header}
         contentContainerStyle={[styles.list, readableColumn]}
         stickySectionHeadersEnabled={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
         renderSectionHeader={({ section }) => (
           <View>
             {section.firstDeviceOnly ? (
@@ -747,7 +766,7 @@ export default function PcScreen() {
                   </Text>
                   {job?.state === 'failed' && job.note ? <Text style={styles.error}>{job.note}</Text> : null}
                 </View>
-                {job && job.state !== 'cancelled' && !(job.state === 'done' && v.state !== 'onDevice') ? (
+                {job && job.state !== 'cancelled' && !(job.state === 'done' && v.state !== 'onDevice' && !job.settling) ? (
                   <JobChip job={job} onRetry={() => queueDownload(v, series)} />
                 ) : v.state === 'onDevice' ? (
                   <View style={styles.chipRow}>

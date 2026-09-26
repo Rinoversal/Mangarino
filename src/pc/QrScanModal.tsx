@@ -5,10 +5,10 @@
  */
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { AppState, Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { APP_NAME, BRAND_HUB_PORT, HUB_NAME } from '../brand';
+import { APP_NAME, APP_SCHEME, BRAND_HUB_PORT, HUB_NAME } from '../brand';
 import { colors, radius, spacing } from '../ui/theme';
 
 import { PairLink, parsePairLink } from './net';
@@ -23,7 +23,7 @@ export function QrScanModal({
   onLink: (link: PairLink) => void;
 }) {
   const insets = useSafeAreaInsets();
-  const [permission, requestPermission] = useCameraPermissions();
+  const [permission, requestPermission, getPermission] = useCameraPermissions();
   const [hint, setHint] = useState<string | null>(null);
   const handled = useRef(false);
   const lastHint = useRef(0);
@@ -36,11 +36,21 @@ export function QrScanModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, permission?.granted]);
 
+  // Back from Settings: see whether camera access was turned on there.
+  useEffect(() => {
+    if (!visible) return;
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void getPermission();
+    });
+    return () => sub.remove();
+  }, [visible, getPermission]);
+
   const onScanned = useCallback(
     ({ data }: { data: string }) => {
       if (handled.current) return; // the camera reports the same code many times a second
       const link = parsePairLink(data, BRAND_HUB_PORT);
-      if (link) {
+      const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(data.trim())?.[1]?.toLowerCase() ?? '';
+      if (link && scheme === APP_SCHEME) {
         handled.current = true;
         onLink(link);
         return;
@@ -48,7 +58,9 @@ export function QrScanModal({
       const now = Date.now();
       if (now - lastHint.current > 2000) {
         lastHint.current = now;
-        setHint(`That QR code isn't from ${HUB_NAME}. Scan the one in ${HUB_NAME}.`);
+        // The other edition's hub listens on another port, so its code can't work here.
+        const other = link && scheme ? `${scheme.charAt(0).toUpperCase()}${scheme.slice(1)} Hub` : null;
+        setHint(other ? `That QR code is from ${other}. Scan the one in ${HUB_NAME}.` : `That QR code isn't from ${HUB_NAME}. Scan the one in ${HUB_NAME}.`);
       }
     },
     [onLink],

@@ -132,6 +132,18 @@ class RemoteLibraryTest(unittest.TestCase):
         # Asking again for a volume that is here now just says so.
         self.assertEqual(self.call("/admin/remote/tab/want/12", {}, "POST", self.admin)[1]["state"], "ready")
 
+    def test_a_request_that_went_nowhere_is_asked_again(self):
+        self.call("/api/catalog", CATALOG, "POST", self.auth)
+        self.call("/admin/remote/tab/want/12", {}, "POST", self.admin)
+        self.call("/api/requests?wait=5", headers=self.auth)  # taken, but say the answer got lost
+        self.assertEqual(self.call("/admin/remote/tab/want/12", headers=self.admin)[1]["state"], "starting")
+        remote = self.hub.remote
+        with remote.lock:
+            remote.asked[("tab", 12)] -= 30  # nothing happened for half a minute
+        self.assertEqual(self.call("/admin/remote/tab/want/12", headers=self.admin)[1]["state"], "waiting")
+        res = self.call("/api/requests?wait=5", headers=self.auth)[1]
+        self.assertEqual([r["volumeId"] for r in res["requests"]], [12])
+
     def test_request_reaches_a_waiting_device_at_once(self):
         self.call("/api/catalog", CATALOG, "POST", self.auth)
         threading.Timer(0.4, lambda: self.call("/admin/remote/tab/want/21", {}, "POST", self.admin)).start()

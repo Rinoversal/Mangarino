@@ -27,6 +27,8 @@ SCAN_EVERY_S = 30.0
 class Hub:
     def __init__(self, config: Config, host: str = "0.0.0.0", log=print, panels: bool = True, cache: Path | None = None):
         self.config, self.log = config, log
+        if config.problem:
+            log(config.problem)
         self.admin_key = secrets.token_urlsafe(24)
         self.gate = FileGate()
         self.transfers = Transfers()
@@ -156,6 +158,7 @@ class Hub:
         rel = rel_of(vol)
         local = self.library.get(volume_id(rel))
         if local is not None:
+            self.remote.done_asking(device_id, vid)
             return {"state": "ready", "volumeId": local.id}
         for t in self.transfers.snapshot()["active"]:
             if t["kind"] == "to PC" and t["name"].lower() == rel.lower():
@@ -163,6 +166,8 @@ class Hub:
         listening = self.remote.is_listening(device_id)
         if self.remote.waiting_for_pickup(device_id, vid):
             return {"state": "waiting", "listening": listening}
+        if listening and self.remote.reask_if_lost(device_id, vid):
+            return {"state": "waiting", "listening": listening}  # the last request seems lost: asked again
         return {"state": "starting", "listening": listening}
 
     def remote_want(self, device_id: str, vid: int) -> dict:
@@ -193,14 +198,15 @@ class Hub:
 
     # ------------------------------------------------------------------ status
     def pair_url(self, ip: str | None = None) -> str:
-        ip = ip if ip in self._ips else (self._ips[0] if self._ips else (self._tailscale[0] if self._tailscale else "127.0.0.1"))
+        away = self._tailscale if self.config.away else []  # the Tailscale address only when "Away from home" is on
+        ip = ip if ip in self._ips else (self._ips[0] if self._ips else (away[0] if away else "127.0.0.1"))
         # As short as possible: fewer characters make a coarser QR code that tablet cameras
         # read easily. The app learns the PC's name and id from the hub once paired.
         params = {"h": ip, "c": self.pairing.current_code()}
         if self.port != DEFAULT_PORT:
             params["p"] = self.port
-        if self._tailscale:
-            params["t"] = self._tailscale[0]  # lets the device reach this PC away from home
+        if away:
+            params["t"] = away[0]  # lets the device reach this PC away from home
         q = urllib.parse.urlencode(params)
         return f"{brand.SCHEME}://pc?{q}"
 

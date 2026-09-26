@@ -60,9 +60,17 @@ _STATIC = re.compile(r"(fonts/)?[a-z0-9_-]+\.(html|js|css|svg|png|woff2|txt)")
 _TAILSCALE = ipaddress.ip_network("100.64.0.0/10")
 
 
-def allowed_client(ip) -> bool:
-    """Home-network, this-PC and Tailscale addresses. Never the open internet."""
-    return ip is not None and (ip.is_private or ip.is_loopback or ip.is_link_local or ip in _TAILSCALE)
+def allowed_client(ip, away: bool = True) -> bool:
+    """Home-network and this-PC addresses, and Tailscale ones while "Away from home" is on.
+    Never the open internet."""
+    if ip is None:
+        return False
+    if ip in _TAILSCALE:
+        return away
+    return ip.is_private or ip.is_loopback or ip.is_link_local
+
+
+_DEVICE_NAMES = {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
 
 
 def safe_name(name: str) -> bool:
@@ -74,6 +82,7 @@ def safe_name(name: str) -> bool:
         and not _BAD_NAME.search(name)
         and not name.startswith((".", " "))
         and not name.endswith((".", " "))
+        and name.split(".")[0].rstrip().upper() not in _DEVICE_NAMES  # "NUL.cbz" is a device on Windows
     )
 
 
@@ -94,7 +103,7 @@ class HubServer(ThreadingHTTPServer):
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = f"MangarinoHub/{VERSION}"
+    server_version = f"{brand.NAME}Hub/{VERSION}"
     protocol_version = "HTTP/1.0"
     timeout = 60  # a stalled device can't hold a thread forever
 
@@ -178,7 +187,11 @@ class Handler(BaseHTTPRequestHandler):
         self._route("DELETE")
 
     def _route(self, method: str) -> None:
-        if not allowed_client(self._ip()):
+        ip = self._ip()
+        if not allowed_client(ip, self.hub.config.away):
+            if ip is not None and ip in _TAILSCALE:
+                self.close_connection = True  # "Away from home" is off: as if this PC were out of reach
+                return
             self.send_json(403, {"error": "private_network_only"})
             return
         url = urllib.parse.urlsplit(self.path)
@@ -646,6 +659,15 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "away":
             hub.set_away(bool(self.read_json().get("on")))
             self.send_json(200, {"ok": True})
+        elif path == "name" and method == "POST":
+            # What devices see when they look for this PC (the Windows name until changed).
+            name = " ".join(str(self.read_json().get("name", "")).split())[:40]
+            if not name or any(ord(c) < 32 for c in name):
+                self.send_json(400, {"error": "bad_name"})
+            else:
+                hub.config.update(name=name)
+                hub.log(f"PC name: {name}")
+                self.send_json(200, {"ok": True, "name": name})
         elif path == "open-url":
             url = str(self.read_json().get("url", ""))
             ok = url.startswith(("https://tailscale.com/", "https://login.tailscale.com/"))  # only pages the hub links to

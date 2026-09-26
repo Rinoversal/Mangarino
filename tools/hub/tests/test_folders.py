@@ -162,6 +162,44 @@ class DiscoveryTest(unittest.TestCase):
 
 
 class PackerTest(unittest.TestCase):
+    def test_packed_size_counts_zip64_past_2_gib(self):
+        import io
+
+        class Sink(io.RawIOBase):  # counts what zipfile writes, keeps nothing
+            pos = size = 0
+
+            def writable(self):
+                return True
+
+            def seekable(self):
+                return True
+
+            def write(self, b):
+                self.pos += len(b)
+                self.size = max(self.size, self.pos)
+                return len(b)
+
+            def seek(self, off, whence=0):
+                self.pos = off if whence == 0 else self.pos + off if whence == 1 else self.size + off
+                return self.pos
+
+            def tell(self):
+                return self.pos
+
+        entries = [("p001.jpg", 900_000_000), ("p002.jpg", 900_000_000), ("p003.jpg", 400_000_000), ("p004.jpg", 1000)]
+        sink = Sink()
+        chunk = bytes(1 << 20)
+        with zipfile.ZipFile(sink, "w", zipfile.ZIP_STORED, allowZip64=True) as z:
+            for name, size in entries:
+                with z.open(zipfile.ZipInfo(name), "w") as f:
+                    left = size
+                    while left:
+                        n = min(left, len(chunk))
+                        f.write(chunk[:n])
+                        left -= n
+        self.assertGreater(sink.size, zipfile.ZIP64_LIMIT)
+        self.assertEqual(sink.size, packed_size(entries))
+
     def test_packed_size_is_exact_and_pages_are_in_order(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d) / "Manga"

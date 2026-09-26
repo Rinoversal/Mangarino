@@ -4,7 +4,7 @@
  */
 import { type AndroidSymbol, type SFSymbol, SymbolView } from 'expo-symbols';
 import React from 'react';
-import { ColorValue, StyleProp, ViewStyle } from 'react-native';
+import { ColorValue, PixelRatio, Platform, StyleProp, ViewStyle } from 'react-native';
 
 import { colors } from './theme';
 
@@ -39,5 +39,15 @@ export function Icon({
   color?: ColorValue;
   style?: StyleProp<ViewStyle>;
 }) {
-  return <SymbolView name={{ android: name, web: name, ios: IOS[name] }} size={size} tintColor={color} style={style} />;
+  // On Android the symbol is drawn as text, which grows with the system text size inside a box
+  // that doesn't: undo that growth so the icon fills its box, as at the default text size.
+  const scale = Platform.OS === 'android' ? PixelRatio.getFontScale() : 1;
+  return (
+    <SymbolView
+      name={{ android: name, web: name, ios: IOS[name] }}
+      size={size / scale}
+      tintColor={color}
+      style={[{ width: size, height: size }, style]}
+    />
+  );
 }

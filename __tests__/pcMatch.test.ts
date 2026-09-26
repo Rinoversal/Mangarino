@@ -7,6 +7,7 @@ import {
   progressKey,
   seriesFolderOf,
   updateReason,
+  volumeKey,
 } from '../src/pc/match';
 
 const pcVol = (file: string, size: number, panels = 'ready') =>
@@ -104,5 +105,14 @@ describe('progressKey', () => {
 
   it('names a folder of images like the hub names folder volumes', () => {
     expect(progressKey('Vagabond', 'Vol 01', 'dir')).toBe('vagabond/vol 01.cbz');
+  });
+
+  it('keys a volume by the folder the PC keeps it in, imported files included', () => {
+    const root = '/storage/emulated/0/Mangarino';
+    const inLibrary = { uri: 'file:///storage/emulated/0/Mangarino/Berserk/Berserk v01.cbz', file_name: 'Berserk v01.cbz', kind: 'cbz' as const };
+    expect(volumeKey(inLibrary, 'Anything', root)).toBe('berserk/berserk v01.cbz');
+    // imported from Downloads: the PC files it under the series title, so its position lives there too
+    const imported = { uri: 'file:///storage/emulated/0/Download/Berserk v01.cbz', file_name: 'Berserk v01.cbz', kind: 'cbz' as const };
+    expect(volumeKey(imported, 'Berserk: Deluxe', root)).toBe('berserk deluxe/berserk v01.cbz');
   });
 });

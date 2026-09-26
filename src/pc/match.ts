@@ -71,11 +71,43 @@ export function seriesFolderOf(uri: string, rootPath: string): string {
   return rest.length >= 2 ? rest[0] : '';
 }
 
+/** The PC folder a device volume goes to: its series folder, or the series title for imported files. */
+export function sendFolder(a: { uri: string }, title: string, rootPath: string): string {
+  const rootNorm = rootPath.replace(/\/+$/, '').toLowerCase() + '/';
+  const underRoot = fromFileUri(a.uri).toLowerCase().startsWith(rootNorm);
+  return underRoot ? seriesFolderOf(a.uri, rootPath) : safeFolderName(title);
+}
+
+/**
+ * A device volume's reading-progress key: the folder the PC keeps it in + its file name, so the
+ * PC's copy and this device's share one position (imported files included).
+ */
+export function volumeKey(a: { uri: string; file_name: string; kind: 'cbz' | 'dir' }, title: string, rootPath: string): string {
+  return progressKey(sendFolder(a, title, rootPath), a.file_name, a.kind);
+}
+
+/** This device's volumes by file name, built once per device list (matching runs for every series). */
+const byNameCache = new WeakMap<DeviceVolume[], Map<string, DeviceVolume[]>>();
+function deviceByName(device: DeviceVolume[]): Map<string, DeviceVolume[]> {
+  let index = byNameCache.get(device);
+  if (!index) {
+    index = new Map();
+    for (const d of device) {
+      const key = normName(d.file);
+      const list = index.get(key);
+      if (list) list.push(d);
+      else index.set(key, [d]);
+    }
+    byNameCache.set(device, index);
+  }
+  return index;
+}
+
 export function matchPcSeries(series: PcSeries, device: DeviceVolume[]): MatchedVolume[] {
   const folder = normName(series.folder);
+  const byName = deviceByName(device);
   return series.volumes.map((v) => {
-    const name = normName(v.file);
-    const same = device.filter((d) => normName(d.file) === name);
+    const same = byName.get(normName(v.file)) ?? [];
     const exact = same.find((d) => d.size === v.size);
     if (exact) return { ...v, state: 'onDevice', device: exact };
     const changed = same.find((d) => normName(d.folder) === folder);

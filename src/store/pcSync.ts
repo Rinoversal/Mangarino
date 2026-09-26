@@ -55,6 +55,8 @@ export interface TransferJob {
   total: number;
   state: 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
   note?: string;
+  /** Downloaded, and the library is still adding it (the volume isn't listed on this device yet). */
+  settling?: boolean;
   // downloads
   volumeId?: string;
   destFolder?: string;
@@ -126,6 +128,8 @@ interface PcSyncState {
   queueDownload: (v: MatchedVolume, series: PcSeries) => void;
   queueUpload: (d: DeviceVolume, opts?: { priority?: boolean; auto?: boolean }) => void;
   cancel: (key: string) => void;
+  /** Stop the running transfer and drop the waiting ones. */
+  cancelAll: () => void;
   clearFinished: () => void;
   setMessage: (m: string | null) => void;
 }
@@ -137,6 +141,7 @@ let searchRunning = false;
 let queueRunning = false;
 let syncing = false;
 let lastSyncAt = 0;
+let refreshMisses = 0; // library refreshes that failed in a row
 const SYNC_EVERY_MS = 15000;
 let current: { key: string; controller: AbortController } | null = null;
 let askTicket = 0; // bumped to abandon the current ask
@@ -394,8 +399,12 @@ export const usePcSync = create<PcSyncState>((set, get) => {
             const dirPath = job.destFolder ? `${root}/${job.destFolder}` : root;
             await downloadVolume(link, job.volumeId!, { dirPath, fileName: job.file }, { signal: controller.signal, onProgress });
             if (job.replacesArchiveId) await clearArchivePages(job.replacesArchiveId);
-            updateJob(job.key, { state: 'done' });
-            void useLibrary.getState().rescan().then(() => get().loadDevice());
+            updateJob(job.key, { state: 'done', settling: true });
+            void useLibrary
+              .getState()
+              .rescan()
+              .then(() => get().loadDevice())
+              .finally(() => updateJob(job.key, { settling: false }));
           } else {
             const res = await uploadVolume(link, { uri: job.uri!, file: job.file, size: job.total }, job.folder ?? '', {
               signal: controller.signal,
@@ -414,6 +423,7 @@ export const usePcSync = create<PcSyncState>((set, get) => {
               set({ jobs: get().jobs.map((j) => (j.kind === 'down' && j.state === 'queued' ? { ...j, state: 'cancelled' } : j)) });
             }
             if (e instanceof HubError && e.status === 401) {
+              set({ jobs: get().jobs.map((j) => (j.state === 'queued' ? { ...j, state: 'cancelled' } : j)) });
               await saveLink(null);
               set({ phase: 'unpaired', listing: null, message: 'The PC no longer knows this device. Connect again.' });
               break;
@@ -486,6 +496,7 @@ export const usePcSync = create<PcSyncState>((set, get) => {
               }
             } catch (e) {
               if (e instanceof HubError && e.status === 401) {
+                get().cancelAll();
                 await saveLink(null);
                 set({ phase: 'unpaired', listing: null, message: 'The PC no longer knows this device. Connect again.' });
               }
@@ -554,11 +565,13 @@ export const usePcSync = create<PcSyncState>((set, get) => {
         const h = await hello(host, link.port, ms, link.token);
         if (!h || h.serverId !== link.serverId) continue;
         if (!h.paired) {
+          get().cancelAll();
           await saveLink(null);
           set({ phase: 'unpaired', via: null, listing: null, message: `${link.name} no longer knows this device. Connect again.` });
           void get().search();
           return;
         }
+        if (h.name && h.name !== link.name) await saveLink({ ...link, name: h.name }); // renamed on the PC
         set({ phase: 'connected', via });
         await get().refresh();
         return;
@@ -719,6 +732,7 @@ export const usePcSync = create<PcSyncState>((set, get) => {
     },
 
     async pairFromLink(p) {
+      await init(); // a link can open the app straight onto this screen
       // At home the home address answers; away, only the Tailscale one can.
       set({ phase: 'pairing', message: null });
       const home = await hello(p.host, p.port, 2500);
@@ -738,15 +752,17 @@ export const usePcSync = create<PcSyncState>((set, get) => {
       if (!link) return;
       try {
         const res = await getLibrary(link, get().listing?.generation);
+        refreshMisses = 0;
         if (!('unchanged' in res)) set({ listing: res });
         if (get().phase !== 'connected') set({ phase: 'connected', message: null });
         if (Date.now() - lastSyncAt > SYNC_EVERY_MS) void doSync(link);
       } catch (e) {
         if (e instanceof HubError && e.status === 401) {
+          get().cancelAll();
           await saveLink(null);
           set({ phase: 'unpaired', listing: null, message: 'The PC no longer knows this device. Connect again.' });
           void get().search();
-        } else {
+        } else if (++refreshMisses >= 2) {
           set({ phase: 'offline', message: `Lost contact with ${link.name}.` });
         }
       }
@@ -777,6 +793,7 @@ export const usePcSync = create<PcSyncState>((set, get) => {
     },
 
     async forget() {
+      get().cancelAll();
       const link = get().link;
       if (link) await unpair(link);
       await saveLink(null);
@@ -833,6 +850,11 @@ export const usePcSync = create<PcSyncState>((set, get) => {
     cancel(key) {
       if (current?.key === key) current.controller.abort();
       else updateJob(key, { state: 'cancelled' });
+    },
+
+    cancelAll() {
+      current?.controller.abort();
+      set({ jobs: get().jobs.map((j) => (j.state === 'queued' ? { ...j, state: 'cancelled' } : j)) });
     },
 
     clearFinished() {

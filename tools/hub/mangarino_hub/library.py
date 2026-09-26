@@ -78,12 +78,16 @@ def volume_id(rel: str) -> str:
 
 def packed_size(entries) -> int:
     """Exact size of the .cbz packer.py writes for these (name, size) entries: stored, no
-    compression, no extra fields. Valid below 4 GB, where zip64 records would be added."""
-    total = 22
+    compression, no extra fields, plus what Python's zipfile adds once the archive passes 2 GiB:
+    an 8-byte offset field on each directory entry beyond that point, and the zip64 end records."""
+    offset = central = count = 0
     for name, size in entries:
         n = len(name.encode("utf-8"))
-        total += 30 + n + size + 46 + n
-    return total
+        central += 46 + n + (12 if offset > zipfile.ZIP64_LIMIT else 0)
+        offset += 30 + n + size
+        count += 1
+    zip64_end = count > zipfile.ZIP_FILECOUNT_LIMIT or offset > zipfile.ZIP64_LIMIT or central > zipfile.ZIP64_LIMIT
+    return offset + central + 22 + (56 + 20 if zip64_end else 0)
 
 
 def _is_link(entry: os.DirEntry) -> bool:

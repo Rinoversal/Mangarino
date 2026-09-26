@@ -284,14 +284,16 @@ function renderTransfers(t) {
 // ------------------------------------------------------------------ the Allow dialog
 let asking = null; // { id, deadline }
 let dialogTimer = null;
+const dismissed = new Set(); // requests closed with Esc: they wait under Devices, without popping up again
 
 function renderPairDialog(s) {
   const reqs = s.pairRequests;
   const current = asking && reqs.find((r) => r.id === asking.id);
   if (asking && !current) closePairDialog(); // answered here, withdrawn or expired
   document.title = reqs.length ? `Allow ${reqs[0].deviceName}? · Mangarino Hub` : 'Mangarino Hub';
-  if (asking || !reqs.length || asking === false) return;
-  const r = reqs[0];
+  for (const id of dismissed) if (!reqs.some((x) => x.id === id)) dismissed.delete(id);
+  const r = reqs.find((x) => !dismissed.has(x.id));
+  if (asking || !r) return;
   asking = { id: r.id, deadline: Date.now() + r.expiresMs, req: r };
   $('pairName').textContent = r.deviceName;
   $('pairMatch').textContent = r.match;
@@ -348,6 +350,8 @@ const PANEL_TEXT = {
 };
 
 function renderSettings(s) {
+  const nameInput = $('nameInput');
+  if (document.activeElement !== nameInput && !nameInput.dataset.dirty) nameInput.value = s.name || '';
   const lib = s.library;
   $('libPath').textContent = lib.root;
   if (!lib.exists) {
@@ -529,12 +533,10 @@ $('bigqr').onclick = () => ($('bigqr').hidden = true);
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (!$('bigqr').hidden) $('bigqr').hidden = true;
-  else if (!$('pairScrim').hidden) {
-    // Not now: the question stays under Devices until it expires.
-    $('pairScrim').hidden = true;
-    clearInterval(dialogTimer);
-    asking = false;
-    setTimeout(() => (asking = null), 30000);
+  else if (!$('pairScrim').hidden && asking) {
+    // Not now: this question stays under Devices until it expires; other devices still ask.
+    dismissed.add(asking.id);
+    closePairDialog();
   }
 });
 
@@ -597,6 +599,21 @@ $('pathForm').onsubmit = async (e) => {
     if (window.Library) window.Library.reload();
   } catch {
     toast('That folder wasn’t found.', { bad: true });
+  }
+  refresh();
+};
+$('nameInput').oninput = () => ($('nameInput').dataset.dirty = '1');
+$('nameForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const name = $('nameInput').value.trim();
+  if (!name) return;
+  try {
+    await post('name', { name });
+    delete $('nameInput').dataset.dirty;
+    $('nameInput').blur();
+    toast('Saved. Your devices show the new name when they next connect.', { name: 'pc' });
+  } catch {
+    toast('That name can’t be used.', { bad: true });
   }
   refresh();
 };

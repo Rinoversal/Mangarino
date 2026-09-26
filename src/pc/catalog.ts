@@ -4,10 +4,9 @@
  */
 import { ArchiveRow, listAllArchives, listSeries } from '../db/repo';
 import { naturalCompare } from '../library/parse';
-import { fromFileUri } from '../platform/paths';
 
 import { CatalogSeries } from './copyPlan';
-import { progressKey, safeFolderName, seriesFolderOf } from './match';
+import { sendFolder, volumeKey } from './match';
 
 export interface Catalog {
   series: CatalogSeries[];
@@ -21,12 +20,6 @@ function shortHash(s: string): string {
   return (h >>> 0).toString(36);
 }
 
-/** The upload folder for a volume: its series folder, or the series title for imported files. */
-export function sendFolder(a: Pick<ArchiveRow, 'uri'>, title: string, rootPath: string): string {
-  const rootNorm = rootPath.replace(/\/+$/, '').toLowerCase() + '/';
-  const underRoot = fromFileUri(a.uri).toLowerCase().startsWith(rootNorm);
-  return underRoot ? seriesFolderOf(a.uri, rootPath) : safeFolderName(title);
-}
 
 export async function buildCatalog(rootPath: string): Promise<Catalog> {
   const [archives, series] = await Promise.all([listAllArchives(), listSeries()]);
@@ -47,7 +40,7 @@ export async function buildCatalog(rootPath: string): Promise<Catalog> {
           id: a.id,
           file: a.file_name,
           folder: sendFolder(a, title, rootPath),
-          key: progressKey(seriesFolderOf(a.uri, rootPath), a.file_name, a.kind),
+          key: volumeKey(a, title, rootPath),
           size: a.size,
           pages: a.page_count,
           kind: a.kind,

@@ -225,6 +225,15 @@ class HubTest(unittest.TestCase):
         self.assertEqual(self.upload(token, "S", "y.cbz", data, size=len(data) + 1)[0], 400)
 
     # ---------------------------------------------------------------- this PC only
+    def test_the_pc_name_can_be_changed(self):
+        key = {"X-Admin-Key": self.hub.admin_key}
+        self.assertEqual(self.call("POST", "/admin/name", {"name": "  Reading   room "}, headers=key)[0], 200)
+        self.assertEqual(self.js("GET", "/api/hello")[1]["name"], "Reading room")
+        for bad in ("", "   ", "a" + chr(7) + "b"):
+            self.assertEqual(self.call("POST", "/admin/name", {"name": bad}, headers=key)[0], 400, repr(bad))
+        self.assertEqual(self.call("POST", "/admin/name", {"name": "x"})[0], 403)  # this PC only
+        self.assertEqual(Config(self.hub.config.path).name, "Reading room")
+
     def test_admin_needs_the_key_and_a_local_host_header(self):
         self.assertEqual(self.call("GET", "/admin/status")[0], 403)
         key = {"X-Admin-Key": self.hub.admin_key}
@@ -233,9 +242,11 @@ class HubTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("code", json.loads(body))
 
-    def test_qr_link_carries_the_tailscale_address_when_there_is_one(self):
+    def test_qr_link_carries_the_tailscale_address_only_when_away_is_on(self):
         self.assertNotIn("t=", self.hub.pair_url())
         self.hub._tailscale = ["100.101.102.103"]
+        self.assertNotIn("t=", self.hub.pair_url())  # "Away from home" is off
+        self.hub.set_away(True)
         self.assertIn("t=100.101.102.103", self.hub.pair_url())
         key = {"X-Admin-Key": self.hub.admin_key}
         self.assertEqual(json.loads(self.call("GET", "/admin/status", headers=key)[2])["tailscale"], ["100.101.102.103"])
@@ -248,16 +259,56 @@ class HubTest(unittest.TestCase):
 
 class PiecesTest(unittest.TestCase):
     def test_safe_name(self):
-        for ok in ("Berserk", "Berserk v01 (2003).cbz", "ワンピース"):
+        for ok in ("Berserk", "Berserk v01 (2003).cbz", "ワンピース", "Console", "Contra v01.cbz", "COM10"):
             self.assertTrue(safe_name(ok), ok)
-        for bad in ("", ".", "..", "a/b", "a\\b", "x:y", ".hidden", "trailing.", " lead", "a" * 300):
+        for bad in ("CON", "nul.cbz", "Com1", "LPT9.zip", "con .cbz", "", ".", "..", "a/b", "a\\b", "x:y", ".hidden", "trailing.", " lead", "a" * 300):
             self.assertFalse(safe_name(bad), bad)
+
+    def test_log_file_stays_small_while_running(self):
+        from mangarino_hub import desktop
+
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "hub.log"
+            old, desktop.LOG_MAX_BYTES = desktop.LOG_MAX_BYTES, 2000
+            try:
+                log = desktop.LogFile(path)
+                for i in range(100):
+                    log(f"line {i} " + "x" * 50)
+            finally:
+                desktop.LOG_MAX_BYTES = old
+            self.assertLessEqual(path.stat().st_size if path.exists() else 0, 2100)  # just rotated: not there yet
+            self.assertTrue(path.with_suffix(".old.log").exists())
+
+    def test_damaged_settings_fall_back_to_the_last_good_copy(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "hub.json"
+            cfg = Config(path)
+            cfg.update(devices=[{"id": "tab-1", "name": "Tab", "token_hash": "x"}])
+            server_id = cfg.server_id
+            path.write_bytes(bytes(200))  # zero-filled, as after a crash
+            again = Config(path)
+            self.assertEqual(again.server_id, server_id)
+            self.assertEqual([x["id"] for x in again.devices], ["tab-1"])
+            self.assertIn("last good copy", again.problem)
+            self.assertTrue((Path(d) / "hub.json.bad").exists())
+            self.assertEqual(Config(path).problem, "")  # and it's whole again
+
+    def test_damaged_settings_without_a_good_copy_start_afresh(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "hub.json"
+            path.write_text("[1, 2", encoding="utf-8")
+            cfg = Config(path)
+            self.assertEqual(cfg.devices, [])
+            self.assertIn("started afresh", cfg.problem)
+            self.assertEqual((Path(d) / "hub.json.bad").read_text(encoding="utf-8"), "[1, 2")
 
     def test_allowed_clients(self):
         for ip in ("192.168.1.20", "10.0.0.2", "172.16.8.10", "127.0.0.1", "100.101.102.103", "169.254.1.1"):
             self.assertTrue(allowed_client(ipaddress.ip_address(ip)), ip)
         for ip in ("8.8.8.8", "100.128.0.1", "1.1.1.1"):
             self.assertFalse(allowed_client(ipaddress.ip_address(ip)), ip)
+        self.assertFalse(allowed_client(ipaddress.ip_address("100.101.102.103"), away=False))  # Tailscale, switch off
+        self.assertTrue(allowed_client(ipaddress.ip_address("192.168.1.20"), away=False))
 
     def test_add_panels_entry_keeps_pages_and_skips_a_changed_file(self):
         from mangarino_hub.panels import add_panels_entry, file_version

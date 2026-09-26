@@ -417,7 +417,7 @@ input[type="text"]:focus { outline: none; border-color: rgba(249, 119, 166, 0.6)
 @media (max-width: 1000px) {
   .app { grid-template-columns: 76px minmax(0, 1fr); }
   .rail { padding: 18px 10px; align-items: center; }
-  .brand-word, .nav-item span:not(.ico), .rail-foot .rail-pc, #statusText, .rail-activity { display: none; }
+  .brand-word, .nav-item span:not(.ico):not(.nav-badge):not(.nav-dot), .rail-foot .rail-pc, #statusText, .rail-activity { display: none; }
   .nav-item { justify-content: center; width: 48px; padding: 0; }
   .nav-item.on::before { left: -10px; }
   .nav-badge, .nav-dot { position: absolute; top: 4px; right: 4px; margin: 0; }

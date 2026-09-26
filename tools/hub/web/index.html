@@ -17,9 +17,9 @@
       <div class="brand-word">Mangarino<span>Hub</span></div>
     </div>
     <nav class="nav" aria-label="Sections">
-      <button class="nav-item" data-view="library"><span class="ico" data-icon="library"></span><span>Library</span></button>
-      <button class="nav-item" data-view="devices"><span class="ico" data-icon="devices"></span><span>Devices</span><span class="nav-badge" id="navBadge" hidden></span></button>
-      <button class="nav-item" data-view="settings"><span class="ico" data-icon="settings"></span><span>Settings</span><span class="nav-dot" id="navWarn" hidden></span></button>
+      <button class="nav-item" data-view="library" title="Library" aria-label="Library"><span class="ico" data-icon="library"></span><span>Library</span></button>
+      <button class="nav-item" data-view="devices" title="Devices" aria-label="Devices"><span class="ico" data-icon="devices"></span><span>Devices</span><span class="nav-badge" id="navBadge" hidden></span></button>
+      <button class="nav-item" data-view="settings" title="Settings" aria-label="Settings"><span class="ico" data-icon="settings"></span><span>Settings</span><span class="nav-dot" id="navWarn" hidden></span></button>
     </nav>
     <div class="rail-activity" id="railActivity" hidden></div>
     <div class="rail-foot">
@@ -108,6 +108,21 @@
       </header>
 
       <div class="settings">
+        <div class="set-group">
+          <div class="set-row">
+            <span class="set-ico" data-icon="pc"></span>
+            <div class="set-text">
+              <div class="set-name">PC name</div>
+              <div class="set-desc">What your phone and tablet show when they look for this PC. It doesn’t have to be your real name.</div>
+            </div>
+          </div>
+          <form class="set-row sub" id="nameForm">
+            <span class="set-ico"></span>
+            <input id="nameInput" type="text" maxlength="40" autocomplete="off" spellcheck="false" aria-label="PC name">
+            <div class="set-ctl"><button type="submit" class="btn ghost">Save</button></div>
+          </form>
+        </div>
+
         <div class="set-group">
           <div class="set-row">
             <span class="set-ico" data-icon="folder"></span>

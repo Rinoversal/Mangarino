@@ -96,6 +96,7 @@
   const progress = new Map();
   let rev = 0;
   let openSeries = null; // the open series' id
+  let openFolder = ''; // and its folder: a tablet-only series gets a PC id once a volume comes over
   let loading = null;
   let lastSummary = '';
   let lastRemoteSig = '';
@@ -202,6 +203,7 @@
     const tile = h('button', { className: 'tile' }, cover, h('div', { className: 'tile-name' }, entry.title), h('div', { className: 'tile-meta' }, bits.join(' · ')));
     tile.onclick = () => {
       openSeries = entry.id;
+      openFolder = entry.folder;
       render();
       document.querySelector('.stage').scrollTop = 0;
     };
@@ -238,8 +240,9 @@
     $('continueWrap').hidden = recent.length === 0 || !!openSeries;
     $('continue').replaceChildren(...recent.slice(0, 8).map(({ e, it, r }) => shelfCard(e, it, r)));
 
-    const entry = openSeries ? all.find((e) => e.id === openSeries) : null;
-    if (openSeries && !entry) openSeries = null;
+    let entry = openSeries ? all.find((e) => e.id === openSeries) : null;
+    if (openSeries && !entry) entry = all.find((e) => norm(e.folder) === norm(openFolder)) || null; // now on the PC
+    openSeries = entry ? entry.id : null;
     if (entry) {
       const onDevice = entry.items.filter((it) => it.dev);
       $('libEyebrow').textContent = 'Series';
@@ -342,7 +345,6 @@
   // ---------------------------------------------------------------- reader
   let cur = null; // { series, vol, key, pages, page, panel }
   let saveTimer = null;
-  let wheelLock = 0;
   let idleTimer = null;
   const FIT_MARGIN = 0.96;
   const MAX_PAGE_FIT_MULTIPLE = 3;
@@ -418,6 +420,7 @@
         if (n < cur.pages.length) new Image().src = imageUrl(`page/${cur.vol.id}/${n}`, cur.vol.version);
       }
     } else {
+      if (img.complete) $('loading').hidden = true; // the same page as last time: already loaded
       layout(animate);
     }
     updateBar();
@@ -582,12 +585,28 @@
     forward ? next() : prev();
   };
   $('reader').onmousemove = wake;
+  // Wheel and touchpad: one gesture turns one page. A touchpad swipe arrives as a stream of small
+  // events (its momentum too), so the stream counts as one gesture until it pauses. Sideways
+  // swipes follow the reading direction; pinching (Ctrl + wheel) never turns pages.
+  let wheelSum = 0;
+  let wheelLast = 0;
+  let wheelTurned = false;
   $('stage').addEventListener('wheel', (e) => {
     e.preventDefault();
+    if (e.ctrlKey) return;
     const now = Date.now();
-    if (now - wheelLock < 250) return;
-    wheelLock = now;
-    e.deltaY > 0 ? next() : prev();
+    if (now - wheelLast > 180) {
+      wheelSum = 0;
+      wheelTurned = false;
+    }
+    wheelLast = now;
+    if (wheelTurned) return;
+    const unit = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? 800 : 1;
+    const sideways = Math.abs(e.deltaX) > Math.abs(e.deltaY);
+    wheelSum += (sideways ? e.deltaX * (prefs.rtl ? -1 : 1) : e.deltaY) * unit;
+    if (Math.abs(wheelSum) < 50) return;
+    wheelTurned = true;
+    wheelSum > 0 ? next() : prev();
   }, { passive: false });
   $('close').onclick = closeReader;
   $('modeBtn').onclick = () => {
@@ -614,7 +633,8 @@
   };
   $('scrub').oninput = () => goToPage(Number($('scrub').value) - 1);
   document.addEventListener('keydown', (e) => {
-    if ($('reader').hidden || !cur) return;
+    // A dialog on top (Allow a device, getting a volume) gets the keys: Esc closes it, not the reader.
+    if ($('reader').hidden || !cur || !$('pairScrim').hidden || !$('fetchScrim').hidden) return;
     const k = e.key;
     if (k === 'ArrowLeft') prefs.rtl ? next() : prev();
     else if (k === 'ArrowRight') prefs.rtl ? prev() : next();

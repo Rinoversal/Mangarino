@@ -6,20 +6,25 @@
  * changed since the revision last seen, applied when newer (the newest change wins, by the time
  * it was read). Cursors are kept per PC. When volumes were added since the last pull, everything
  * is pulled again, because the PC may already know where those volumes were left.
- * Volumes are matched by series folder + file name (progressKey), like the PC screen matches them.
+ * Volumes are matched by the folder the PC keeps them in + file name (volumeKey), so an imported
+ * file shares its position with its copy on the PC.
  */
-import { applySyncedProgress, getAllSettings, listAllArchives, listProgressChangedSince, setSetting } from '../db/repo';
+import { applySyncedProgress, getAllSettings, listAllArchives, listProgressChangedSince, listSeries, setSetting } from '../db/repo';
 
 import { PcLink, SyncedProgress, getProgress, postProgress } from './api';
-import { progressKey, seriesFolderOf } from './match';
+import { volumeKey } from './match';
 
 const PUSH_BATCH = 200;
 
 export async function syncProgress(link: PcLink, rootPath: string): Promise<{ pushed: number; pulled: number }> {
   const all = await getAllSettings();
-  const pushKey = `pcSyncPushMs:${link.serverId}`;
-  const revKey = `pcSyncRev:${link.serverId}`;
-  const countKey = `pcSyncVolumes:${link.serverId}`;
+  // "2": imported files got new keys (their PC folder), so everything goes over once more.
+  const pushKey = `pcSyncPushMs2:${link.serverId}`;
+  const revKey = `pcSyncRev2:${link.serverId}`;
+  const countKey = `pcSyncVolumes2:${link.serverId}`;
+  const titles = new Map((await listSeries()).map((s) => [s.id, s.title_override ?? s.title]));
+  const keyOf = (a: { uri: string; file_name: string; kind: 'cbz' | 'dir'; series_id: number }) =>
+    volumeKey(a, titles.get(a.series_id) ?? 'Untitled', rootPath);
   let lastPush = Number(all[pushKey]) || 0;
   const lastRev = Number(all[revKey]) || 0;
 
@@ -30,7 +35,7 @@ export async function syncProgress(link: PcLink, rootPath: string): Promise<{ pu
     for (let i = 0; i < changed.length; i += PUSH_BATCH) {
       const batch = changed.slice(i, i + PUSH_BATCH);
       const rows: SyncedProgress[] = batch.map((r) => ({
-        key: progressKey(seriesFolderOf(r.uri, rootPath), r.file_name, r.kind),
+        key: keyOf(r),
         page: r.page_index,
         panel: r.panel_index,
         completed: r.completed === 1,
@@ -50,7 +55,7 @@ export async function syncProgress(link: PcLink, rootPath: string): Promise<{ pu
   if (since > 0 && remote.rev < lastRev) remote = await getProgress(link, 0); // the PC's history was reset
   let pulled = 0;
   if (remote.rows.length) {
-    const byKey = new Map(archives.map((a) => [progressKey(seriesFolderOf(a.uri, rootPath), a.file_name, a.kind), a]));
+    const byKey = new Map(archives.map((a) => [keyOf(a), a]));
     for (const row of remote.rows) {
       const a = byKey.get(row.key);
       if (!a) continue; // a volume this device doesn't have (a full pull picks it up once it arrives)

@@ -21,6 +21,8 @@ MAX_VOLUMES = 50000
 MAX_TEXT = 300
 MAX_WAIT_S = 25
 ONLINE_S = 40  # a device that asked for requests this recently is listening
+REASK_S = 20  # a request taken this long ago with nothing happening is asked again
+ASK_FORGET_S = 600  # after this, a request the PC made is forgotten
 
 
 def _text(v, limit: int = MAX_TEXT) -> str:
@@ -183,12 +185,27 @@ class RemoteLibraries:
         if vol is None:
             return False
         with self.lock:
+            now = time.time()
             queue = self.pending.setdefault(device_id, [])
             if not any(r["volumeId"] == volume_id for r in queue):
                 queue.append({"id": secrets.token_hex(6), "kind": "send", "volumeId": volume_id})
-            self.asked[(device_id, volume_id)] = time.time()
+            self.asked = {k: t for k, t in self.asked.items() if now - t < ASK_FORGET_S}
+            self.asked[(device_id, volume_id)] = now
             self.changed.notify_all()
         return True
+
+    def reask_if_lost(self, device_id: str, volume_id: int) -> bool:
+        """A request the device took a while ago with nothing happening since (the answer may never
+        have reached it): ask once more. The device ignores a repeat of one it's working on."""
+        with self.lock:
+            at = self.asked.get((device_id, volume_id))
+            if at is None or not REASK_S <= time.time() - at < ASK_FORGET_S:
+                return False
+        return self.ask_to_send(device_id, volume_id)
+
+    def done_asking(self, device_id: str, volume_id: int) -> None:
+        with self.lock:
+            self.asked.pop((device_id, volume_id), None)
 
     def waiting_for_pickup(self, device_id: str, volume_id: int) -> bool:
         with self.lock:
@@ -198,6 +215,7 @@ class RemoteLibraries:
         with self.lock:
             self.catalogs.pop(device_id, None)
             self.pending.pop(device_id, None)
+            self.asked = {k: t for k, t in self.asked.items() if k[0] != device_id}
         try:
             self._catalog_file(device_id).unlink()
         except OSError:

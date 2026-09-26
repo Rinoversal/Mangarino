@@ -10,7 +10,7 @@ chapters and page order from the file names, never copies or unpacks your archiv
 your place per series and per volume. Bookmarks are one tap away.
 
 - **Download:** https://github.com/Rinoversal/Mangarino/releases/latest, or try the
-  [1.1.0 beta](https://github.com/Rinoversal/Mangarino/releases/tag/v1.1.0-beta.1) with the PC hub
+  [1.1.0 beta](https://github.com/Rinoversal/Mangarino/releases/tag/v1.1.0-beta.2) with the PC hub
 - **Details:** [TECHNICAL.md](TECHNICAL.md) explains how the reader gets pages out of a 500 MB zip
   without extracting it, and how panel mode works
 - **Panel tool:** [tools/panelizer](tools/panelizer/README.md) runs on your PC and writes panel

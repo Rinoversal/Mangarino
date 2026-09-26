@@ -40,9 +40,12 @@ class LogFile:
     def __init__(self, path: Path):
         self.path = path
         self.lock = threading.Lock()
+        self._rotate_if_big()
+
+    def _rotate_if_big(self) -> None:
         try:
-            if path.exists() and path.stat().st_size > LOG_MAX_BYTES:
-                os.replace(path, path.with_suffix(".old.log"))
+            if self.path.exists() and self.path.stat().st_size > LOG_MAX_BYTES:
+                os.replace(self.path, self.path.with_suffix(".old.log"))
         except OSError:
             pass
 
@@ -57,8 +60,12 @@ class LogFile:
             try:
                 with open(self.path, "a", encoding="utf-8") as f:
                     f.write(line + "\n")
+                    f.flush()
+                    big = os.fstat(f.fileno()).st_size > LOG_MAX_BYTES
             except OSError:
-                pass
+                return
+            if big:  # a hub left running for weeks keeps a fresh log and one old one
+                self._rotate_if_big()
 
 
 def message_box(text: str, error: bool = False) -> None:
