@@ -57,11 +57,22 @@ class AttachBoxesTest(unittest.TestCase):
         self.assertEqual(out[0], [0, 0, 640, 500])  # 80 px (a third) of it in A
         self.assertEqual(out[1], [400, 0, 1000, 500])  # 120 px in B
 
-    def test_balloon_across_a_gutter_between_stacked_panels_stays_with_one(self):
+    def test_balloon_across_a_gutter_between_stacked_panels_is_whole_in_both(self):
         top, bottom = [0, 0, 1000, 480], [0, 520, 1000, 1000]
         out = pz.attach_boxes([top, bottom], [([300, 400, 500, 640], 0.0)], W, H)
-        self.assertEqual(out[0], top)  # 80 px of it in the top panel: rows stay apart
+        self.assertEqual(out[0], [0, 0, 1000, 640])  # 80 px (a third) of it in the top panel
         self.assertEqual(out[1], [0, 400, 1000, 1000])  # 120 px in the bottom one
+
+    def test_a_panel_holding_the_lettering_grows_even_with_little_of_the_balloon(self):
+        a, b = [0, 0, 480, 500], [520, 0, 1000, 500]
+        # a big balloon mostly in B (80%), its lettering near the gutter, half in A
+        out = pz.attach_boxes([a, b], [([400, 100, 1000, 200], 0.0, [420, 120, 540, 180])], W, H)
+        self.assertEqual(out[0], [0, 0, 1000, 500])
+        self.assertEqual(out[1], [400, 0, 1000, 500])
+
+    def test_lettering_sticking_out_of_a_balloon_is_taken_in(self):
+        items = pz.with_lettering([([100, 100, 300, 250], 0.005)], [[150, 150, 350, 200], [600, 600, 700, 700]])
+        self.assertEqual(items, [([100, 100, 350, 250], 0.005, [150, 150, 350, 200])])
 
     def test_growth_is_clamped_to_the_page(self):
         out = pz.attach_boxes([[600, 100, 990, 600]], [([900, 200, 1000, 300], 0.02)], W, H)
@@ -122,7 +133,7 @@ class GrowthItemsTest(unittest.TestCase):
     def test_lettering_inside_a_detected_balloon_is_not_searched(self):
         im, _ = page()
         items = pz.growth_items([], [("bubble", [100, 100, 300, 250]), ("text_bubble", [150, 150, 250, 200])], im, 1.0, 1.0)
-        self.assertEqual(items, [([100, 100, 300, 250], pz.BUBBLE_PAD_FRAC)])
+        self.assertEqual(items, [([100, 100, 300, 250], pz.BUBBLE_PAD_FRAC, [150, 150, 250, 200])])
 
     def test_uncovered_lettering_uses_its_container(self):
         im, d = page()
@@ -137,7 +148,7 @@ class GrowthItemsTest(unittest.TestCase):
         im, d = page()
         letters(d, 200, 150, 320, 220)
         items = pz.growth_items([[198, 148, 322, 222]], [], im, 1.0, 1.0)
-        self.assertEqual(items, [([198, 148, 322, 222], pz.TEXT_PAD_FRAC)])
+        self.assertEqual(items, [([198, 148, 322, 222], pz.TEXT_PAD_FRAC, [198, 148, 322, 222])])
 
     def test_bare_loose_text_is_skipped_but_boxed_loose_text_counts(self):
         im, d = page()
@@ -154,11 +165,41 @@ class GrowthItemsTest(unittest.TestCase):
         self.assertEqual(items[0][0], [20, 60, 60, 120])
 
 
+class DropBoxesTest(unittest.TestCase):
+    def test_a_box_around_two_panels_is_dropped(self):
+        a, b, around = [0, 0, 480, 500], [520, 0, 1000, 500], [0, 0, 1000, 500]
+        self.assertEqual(pz.drop_phantoms([around, a, b]), [a, b])
+
+    def test_a_big_panel_with_small_insets_stays(self):
+        big, i1, i2 = [0, 0, 1000, 1000], [50, 50, 250, 250], [700, 700, 950, 950]
+        self.assertEqual(pz.drop_phantoms([big, i1, i2]), [big, i1, i2])
+
+    def test_a_panel_found_in_overlapping_pieces_stays(self):
+        big, p1, p2 = [0, 0, 1000, 500], [0, 0, 600, 500], [400, 0, 1000, 500]
+        self.assertEqual(pz.drop_phantoms([big, p1, p2]), [big, p1, p2])
+
+    def test_a_panel_found_twice_keeps_the_bigger_box(self):
+        outer, again, inset = [0, 0, 1000, 400], [0, 50, 1000, 350], [100, 100, 200, 200]
+        self.assertEqual(pz.drop_duplicates([outer, again]), [outer])
+        self.assertEqual(pz.drop_duplicates([outer, inset]), [outer, inset])
+
+
 class PostprocessTest(unittest.TestCase):
+    def test_reading_order_comes_from_the_frames_not_the_grown_boxes(self):
+        im = Image.new("RGB", (W, H), "white")
+        xyxy = [[0, 0, 480, 500], [520, 0, 1000, 500]]
+        bubbles = [("bubble", [200, 100, 1000, 200])]  # most of it in the right panel, 35% in the left
+        out = pz.postprocess(xyxy, [0, 0], W, H, 1.0, 1.0, True, bubbles=bubbles, image=im)
+        # both grow to the right edge; right-to-left order still starts with the right panel
+        self.assertEqual(out, [
+            {"x": 195, "y": 0, "w": 805, "h": 500, "frame": [520, 0, 480, 500]},
+            {"x": 0, "y": 0, "w": 1000, "h": 500, "frame": [0, 0, 480, 500]},
+        ])
+
     def test_bubbles_off_keeps_lettering_padding(self):
         xyxy = [[0, 0, 480, 500], [520, 0, 1000, 500], [400, 100, 560, 200]]
         out = pz.postprocess(xyxy, [0, 0, 1], W, H, 1.0, 1.0, True)
-        self.assertEqual(out[1], {"x": 0, "y": 0, "w": 580, "h": 500})  # 560 + 2% of 1000
+        self.assertEqual(out[1], {"x": 0, "y": 0, "w": 580, "h": 500, "frame": [0, 0, 480, 500]})  # 560 + 2% of 1000
 
     def test_bubbles_on_grows_to_the_whole_balloon(self):
         im = Image.new("RGB", (W, H), "white")

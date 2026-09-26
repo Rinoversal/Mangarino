@@ -49,8 +49,12 @@ MERGE_IOU = 0.7  # merge boxes overlapping more than this (keep the union)
 ROW_OVERLAP = 0.40  # vertical overlap (of the shorter box) needed to share a row
 TEXT_ATTACH_MIN = 0.15  # a text box belongs to a panel when at least this much of it lies inside
 TEXT_SPILL_FRAC = 0.005  # ...and it pokes out of that panel by more than this (of page width)
-TEXT_SHARE_MIN = 0.30  # a panel beside it holding this much of a balloon grows over it too
-GROWTH = 2  # the growth rules' revision, stored in the file: the hub redoes volumes made with older ones
+TEXT_SHARE_MIN = 0.30  # another panel holding this much of a balloon (or of its lettering) grows over it too
+GROWTH = 3  # the growth rules' revision, stored in the file: the hub redoes volumes made with older ones
+PHANTOM_CHILD_IN = 0.85  # a box counts as inside a bigger one when this much of it lies inside
+PHANTOM_COVER = 0.8  # a box covered this much by smaller boxes (2+ of them inside it) is a phantom around them
+PHANTOM_KID_OVERLAP = 0.3  # ...unless two of those overlap by this much of the smaller: pieces of one panel
+DUPLICATE_FILL = 0.5  # a box inside exactly one bigger box and filling this much of it is that panel again
 TEXT_PAD_FRAC = 0.02  # text boxes hug the lettering; pad them (of page width) to take in the balloon
 BUBBLE_REPO = "ogkalu/comic-text-and-bubble-detector"
 BUBBLE_THRESHOLD = 0.3  # RT-DETR score cut-off
@@ -197,42 +201,136 @@ def reading_order(boxes: list[list[float]], rtl: bool = True) -> list[list[float
     return ordered
 
 
-def attach_boxes(panels: list[list[float]], items: list[tuple[list[float], float]], w: int, h: int) -> list[list[float]]:
+def _area(a) -> float:
+    return max(0.0, a[2] - a[0]) * max(0.0, a[3] - a[1])
+
+
+def _inter(a, b) -> float:
+    iw = min(a[2], b[2]) - max(a[0], b[0])
+    ih = min(a[3], b[3]) - max(a[1], b[1])
+    return iw * ih if iw > 0 and ih > 0 else 0.0
+
+
+def _union(a, b) -> list[float]:
+    return [min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3])]
+
+
+def _union_area(boxes, clip) -> float:
+    """Exact area of the union of `boxes` clipped to `clip` (a few boxes: coordinate compression)."""
+    bs = []
+    for b in boxes:
+        c = [max(b[0], clip[0]), max(b[1], clip[1]), min(b[2], clip[2]), min(b[3], clip[3])]
+        if c[2] > c[0] and c[3] > c[1]:
+            bs.append(c)
+    xs = sorted({v for b in bs for v in (b[0], b[2])})
+    total = 0.0
+    for x1, x2 in zip(xs, xs[1:]):
+        spans = sorted((b[1], b[3]) for b in bs if b[0] <= x1 and b[2] >= x2)
+        covered, top, bottom = 0.0, None, None
+        for y1, y2 in spans:
+            if top is None or y1 > bottom:
+                if top is not None:
+                    covered += bottom - top
+                top, bottom = y1, y2
+            else:
+                bottom = max(bottom, y2)
+        if top is not None:
+            covered += bottom - top
+        total += (x2 - x1) * covered
+    return total
+
+
+def drop_phantoms(boxes: list[list[float]]) -> list[list[float]]:
+    """Drop "phantom" panels: a detected box around 2+ other detected panels that together cover most
+    of it (PHANTOM_COVER). In panel mode such a box is an extra zoomed-out step, and it takes balloons
+    away from the real panels. A big panel with small insets is kept (the insets cover little of it),
+    and so is a box whose "panels" overlap each other a lot (PHANTOM_KID_OVERLAP): those are pieces of
+    that one panel. Smallest boxes first, so a dropped box never counts as cover for a bigger one."""
+    order = sorted(range(len(boxes)), key=lambda i: _area(boxes[i]))
+    dropped: set[int] = set()
+    for r in order:
+        big = boxes[r]
+        a_big = _area(big)
+        if a_big <= 0:
+            continue
+        smaller = [j for j in range(len(boxes)) if j != r and j not in dropped and _area(boxes[j]) < a_big]
+        kids = [j for j in smaller if _area(boxes[j]) > 0 and _inter(boxes[j], big) >= PHANTOM_CHILD_IN * _area(boxes[j])]
+        if len(kids) < 2:
+            continue
+        if any(_inter(boxes[a], boxes[b]) >= PHANTOM_KID_OVERLAP * min(_area(boxes[a]), _area(boxes[b]))
+               for n, a in enumerate(kids) for b in kids[n + 1:]):
+            continue
+        if _union_area([boxes[j] for j in smaller if _inter(boxes[j], big) > 0], big) >= PHANTOM_COVER * a_big:
+            dropped.add(r)
+    return [b for i, b in enumerate(boxes) if i not in dropped]
+
+
+def drop_duplicates(boxes: list[list[float]]) -> list[list[float]]:
+    """Drop a box lying inside exactly one bigger box and filling at least DUPLICATE_FILL of it: the
+    same panel detected twice, or a big piece of it. Panel mode would show it as an extra step.
+    Small insets inside a big panel (filling less of it) stay."""
+    keep = []
+    for i, b in enumerate(boxes):
+        a = _area(b)
+        outer = [c for j, c in enumerate(boxes) if j != i and _area(c) > a and _inter(b, c) >= PHANTOM_CHILD_IN * a]
+        if a > 0 and len(outer) == 1 and a >= DUPLICATE_FILL * _area(outer[0]):
+            continue
+        keep.append(b)
+    return keep
+
+
+def with_lettering(items, lettering):
+    """(box, pad) growth items -> (box and its lettering, pad, the lettering's union or None).
+    An item's lettering is every lettering box at least COVERED_FRAC inside it; the item grows to take
+    it in, so lettering sticking out of a partly detected balloon isn't cut."""
+    out = []
+    for t, pad in items:
+        core = None
+        for letters in lettering:
+            a = _area(letters)
+            if a > 0 and _inter(letters, t) >= COVERED_FRAC * a:
+                core = list(letters) if core is None else _union(core, letters)
+        out.append((_union(t, core) if core else list(t), pad, core))
+    return out
+
+
+def attach_boxes(panels: list[list[float]], items, w: int, h: int) -> list[list[float]]:
     """Grow each panel over the balloons and captions that spill over its border.
 
-    `items` are (box, pad) pairs in page pixels, the pad being a fraction of the page width.
-    Every box is given to the panel holding the largest share of it (at least
-    TEXT_ATTACH_MIN of the box's area), and also to any panel beside that one (sharing its row)
-    holding at least TEXT_SHARE_MIN: a balloon across the gutter between two panels side by
-    side is then whole in both. Between stacked panels it stays with the one holding most of
-    it, because growing both would merge their rows and upset the reading order. If the box
-    pokes out of a panel it's given to by more than TEXT_SPILL_FRAC of the page width, the
-    panel becomes the union with the padded box. Boxes wholly inside their panel, or outside
-    every panel, change nothing. Growth is measured against the original panels, so one
-    expansion never pulls in another panel's balloons.
+    `items` are (box, pad) or (box, pad, lettering) in page pixels, the pad being a fraction of the
+    page width and lettering the union of the lettering in the box (see with_lettering). Every box is
+    given to the panel holding the largest share of it (at least TEXT_ATTACH_MIN of the box's area),
+    and also to every other panel holding at least TEXT_SHARE_MIN of the box or of its lettering,
+    beside it or above/below it: a balloon across a gutter is then whole in both views. (Reading
+    order comes from the panels' frames, so growth can't upset it.) If the box pokes out of a panel it
+    is given to by more than TEXT_SPILL_FRAC of the page width, the panel becomes the union with the
+    padded box. Boxes wholly inside their panel, or outside every panel, change nothing. Growth is
+    measured against the original panels, so one expansion never pulls in another panel's balloons.
     """
     if not panels or not items:
-        return panels
+        return [list(p) for p in panels]
     out = [list(p) for p in panels]
     spill = TEXT_SPILL_FRAC * w
-    for t, pad_frac in items:
-        area = (t[2] - t[0]) * (t[3] - t[1])
+    for item in items:
+        t, pad_frac = item[0], item[1]
+        core = item[2] if len(item) > 2 else None
+        area = _area(t)
         if area <= 0:
             continue
+        core_area = _area(core) if core else 0.0
         shares = []
         for i, p in enumerate(panels):
-            iw = min(t[2], p[2]) - max(t[0], p[0])
-            ih = min(t[3], p[3]) - max(t[1], p[1])
-            if iw > 0 and ih > 0:
-                shares.append((iw * ih / area, i))
+            in_box = _inter(t, p) / area
+            if in_box > 0:
+                shares.append((in_box, _inter(core, p) / core_area if core_area > 0 else 0.0, i))
         if not shares:
             continue
-        best_frac, best = max(shares)
+        best_frac, _, best = max(shares)
         if best_frac < TEXT_ATTACH_MIN:
             continue
         pad = pad_frac * w
-        for frac, i in shares:
-            if i != best and (frac < TEXT_SHARE_MIN or not share_row(panels[best], panels[i])):
+        for in_box, in_letters, i in shares:
+            if i != best and max(in_box, in_letters) < TEXT_SHARE_MIN:
                 continue
             p = panels[i]
             if t[0] >= p[0] - spill and t[1] >= p[1] - spill and t[2] <= p[2] + spill and t[3] <= p[3] + spill:
@@ -307,7 +405,7 @@ def _covered(t: list[float], balloons: list[list[float]]) -> bool:
     return False
 
 
-def growth_items(texts, bubbles, image, sx: float, sy: float) -> list[tuple[list[float], float]]:
+def growth_items(texts, bubbles, image, sx: float, sy: float) -> list:
     """What panels should grow over, as (box in page pixels, pad fraction) pairs.
 
     - Whole balloons from the bubble model, padded slightly.
@@ -318,8 +416,10 @@ def growth_items(texts, bubbles, image, sx: float, sy: float) -> list[tuple[list
     `texts` are page pixels; `bubbles` are (name, box) in `image` pixels.
     """
 
-    def page(b):
-        return [b[0] * sx, b[1] * sy, b[2] * sx, b[3] * sy]
+    pw, ph = image.size[0] * sx, image.size[1] * sy
+
+    def page(b):  # to page pixels, kept on the page
+        return [min(max(b[0] * sx, 0.0), pw), min(max(b[1] * sy, 0.0), ph), min(max(b[2] * sx, 0.0), pw), min(max(b[3] * sy, 0.0), ph)]
 
     balloons = [page(b) for n, b in bubbles if n == "bubble"]
     lettering = list(texts) + [page(b) for n, b in bubbles if n == "text_bubble"]
@@ -345,13 +445,16 @@ def growth_items(texts, bubbles, image, sx: float, sy: float) -> list[tuple[list
         c = container(t)
         if c:
             items.append((c, BUBBLE_PAD_FRAC))
-    return items
+    return with_lettering(items, lettering)
 
 
 def postprocess(xyxy, cls, w: int, h: int, sx: float, sy: float, rtl: bool, bubbles=None, image=None) -> list[dict]:
-    """Class split, scale to original pixels, clamp, area filter, merge, grow panels over
-    spilling balloons, round, sort. Sorting runs on the final integer boxes so the app, which
-    re-sorts them for the reader's direction, gets exactly this order back.
+    """Class split, scale to original pixels, clamp, area filter, merge, drop phantom and duplicate
+    boxes, grow panels over spilling balloons, round, sort.
+
+    Each panel is {x, y, w, h} (grown) plus "frame": [x, y, w, h], the panel as detected. Reading
+    order is decided on the frames, which the app and the PC reader sort by too (they re-sort for
+    the reader's direction), so growing over balloons never changes the order.
 
     `bubbles` is the bubble model's [(name, box)] for this page in decoded-image pixels, with
     `image` the decoded page. None means --bubbles off: lettering plus padding only."""
@@ -371,20 +474,29 @@ def postprocess(xyxy, cls, w: int, h: int, sx: float, sy: float, rtl: bool, bubb
         boxes.append([x1, y1, x2, y2])
     boxes = merge_overlapping(boxes)
     boxes = [b for b in boxes if (b[2] - b[0]) * (b[3] - b[1]) >= min_area]
+    boxes = drop_duplicates(drop_phantoms(boxes))
     if bubbles is None:
-        boxes = attach_text(boxes, texts, w, h)
+        grown = attach_text(boxes, texts, w, h)
     else:
-        boxes = attach_boxes(boxes, growth_items(texts, bubbles, image, sx, sy), w, h)
-    ints: list[list[float]] = []
-    for x1, y1, x2, y2 in boxes:
-        ix1, iy1 = int(round(x1)), int(round(y1))
-        ix2, iy2 = int(round(x2)), int(round(y2))
-        ix1, iy1 = max(0, min(w, ix1)), max(0, min(h, iy1))
-        ix2, iy2 = max(0, min(w, ix2)), max(0, min(h, iy2))
-        if ix2 - ix1 < 1 or iy2 - iy1 < 1:
-            continue
-        ints.append([ix1, iy1, ix2, iy2])
-    return [{"x": x1, "y": y1, "w": x2 - x1, "h": y2 - y1} for x1, y1, x2, y2 in reading_order(ints, rtl)]
+        grown = attach_boxes(boxes, growth_items(texts, bubbles, image, sx, sy), w, h)
+
+    def to_int(b):
+        x1, y1 = max(0, min(w, int(round(b[0])))), max(0, min(h, int(round(b[1]))))
+        x2, y2 = max(0, min(w, int(round(b[2])))), max(0, min(h, int(round(b[3]))))
+        return [x1, y1, x2, y2] if x2 - x1 >= 1 and y2 - y1 >= 1 else None
+
+    frames, finals = [], []
+    for f, g in zip(boxes, grown):
+        fi, gi = to_int(f), to_int(g)
+        if fi and gi:
+            frames.append(fi)
+            finals.append(gi)
+    at = {id(f): i for i, f in enumerate(frames)}  # reading_order hands back the same lists
+    out = []
+    for f in reading_order(frames, rtl):
+        g = finals[at[id(f)]]
+        out.append({"x": g[0], "y": g[1], "w": g[2] - g[0], "h": g[3] - g[1], "frame": [f[0], f[1], f[2] - f[0], f[3] - f[1]]})
+    return out
 
 
 # --------------------------------------------------------------------------- model

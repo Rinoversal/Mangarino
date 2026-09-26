@@ -34,11 +34,14 @@ const MAX_PAGE_FIT_MULTIPLE = 3;
 const MOVE_MS = 280;
 const FADE_MS = 140;
 /** Extra room kept around each panel, as a fraction of the page's shorter side, so art and
- * speech bubbles touching the panel border are not clipped or dimmed. */
+ * speech bubbles touching the panel border are not clipped or dimmed. Panels from 1.1.1's
+ * panelizer (they have a frame) already grew over their balloons, so they need less, and more
+ * would show slivers of the neighbouring panel's lettering. */
 const FOCUS_PAD_FRAC = 0.02;
+const FOCUS_PAD_FRAC_GROWN = 0.01;
 
 function padRect(rect: PanelRect, imgW: number, imgH: number): PanelRect {
-  const pad = FOCUS_PAD_FRAC * Math.min(imgW, imgH);
+  const pad = (rect.frame ? FOCUS_PAD_FRAC_GROWN : FOCUS_PAD_FRAC) * Math.min(imgW, imgH);
   const x1 = Math.max(0, rect.x - pad);
   const y1 = Math.max(0, rect.y - pad);
   const x2 = Math.min(imgW, rect.x + rect.w + pad);

@@ -101,7 +101,7 @@ def _is_link(entry: os.DirEntry) -> bool:
     return bool(attrs & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
 
 
-GROWTH = 2  # panelize.py's growth rules: files made with older ones are redone
+GROWTH = 3  # panelize.py's growth rules: files made with older ones are redone
 
 
 def _state_of(raw: bytes) -> str:

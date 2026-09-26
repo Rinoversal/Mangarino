@@ -28,6 +28,24 @@ describe('readingOrder', () => {
     expect(readingOrder([top, bottom, tall], false)).toEqual([tall, top, bottom]);
   });
 
+  it('orders by the frame when panels grew over balloons', () => {
+    // The left panel grew right across the page over a balloon; as drawn it's still the left one.
+    const left: PanelRect = { x: 0, y: 0, w: 1000, h: 500, frame: { x: 0, y: 0, w: 480, h: 500 } };
+    const right: PanelRect = { x: 195, y: 0, w: 805, h: 500, frame: { x: 520, y: 0, w: 480, h: 500 } };
+    expect(readingOrder([left, right], true)).toEqual([right, left]);
+    expect(readingOrder([right, left], false)).toEqual([left, right]);
+  });
+
+  it('reads the frame from a panel file, ignoring a bad one', () => {
+    const json = JSON.stringify([
+      { x: 0, y: 0, w: 1000, h: 500, frame: [0, 0, 480, 500] },
+      { x: 520, y: 0, w: 480, h: 500, frame: [520, 0, 'x', 500] },
+    ]);
+    const rects = parsePagePanels(json);
+    expect(rects[0].frame).toEqual({ x: 0, y: 0, w: 480, h: 500 });
+    expect(rects[1].frame).toBeUndefined();
+  });
+
   it('re-sorts stored panels for the requested direction', () => {
     const json = JSON.stringify([B, A, D, C]);
     expect(parsePagePanels(json)).toEqual([B, A, D, C]);

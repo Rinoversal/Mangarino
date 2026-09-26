@@ -69,8 +69,16 @@
     return ordered;
   }
   function readingOrder(rects, rtl) {
-    const boxes = rects.map((r) => [r.x, r.y, r.x + r.w, r.y + r.h]);
-    return orderBoxes(boxes, rtl).map(([x1, y1, x2, y2]) => ({ x: x1, y: y1, w: x2 - x1, h: y2 - y1 }));
+    // By each panel's frame (the panel as detected) when the file has one, so growth over balloons
+    // never changes the order; orderBoxes hands back the same arrays, so map them back to panels.
+    const panelOf = new Map();
+    const boxes = rects.map((r) => {
+      const f = Array.isArray(r.frame) && r.frame.length === 4 ? { x: r.frame[0], y: r.frame[1], w: r.frame[2], h: r.frame[3] } : r;
+      const box = [f.x, f.y, f.x + f.w, f.y + f.h];
+      panelOf.set(box, r);
+      return box;
+    });
+    return orderBoxes(boxes, rtl).map((box) => panelOf.get(box));
   }
 
   // ---------------------------------------------------------------- preferences (this PC only)
@@ -349,6 +357,7 @@
   const FIT_MARGIN = 0.96;
   const MAX_PAGE_FIT_MULTIPLE = 3;
   const FOCUS_PAD_FRAC = 0.02;
+  const FOCUS_PAD_FRAC_GROWN = 0.01; // panels that already grew over their balloons (they have a frame)
 
   function pagePanels() {
     const p = cur.pages[cur.page];
@@ -446,7 +455,7 @@
     if (panels.length) {
       cur.panel = Math.min(Math.max(0, cur.panel), panels.length - 1);
       const r = panels[cur.panel];
-      const pad = FOCUS_PAD_FRAC * Math.min(W, H);
+      const pad = (r.frame ? FOCUS_PAD_FRAC_GROWN : FOCUS_PAD_FRAC) * Math.min(W, H);
       const x1 = Math.max(0, r.x - pad);
       const y1 = Math.max(0, r.y - pad);
       rect = { x: x1, y: y1, w: Math.min(W, r.x + r.w + pad) - x1, h: Math.min(H, r.y + r.h + pad) - y1 };

@@ -3,6 +3,9 @@ export interface PanelRect {
   y: number;
   w: number;
   h: number;
+  /** The panel as detected, before it grew over speech balloons (panel files from 1.1.1's
+   * panelizer). Reading order uses it, so growth never changes the order. */
+  frame?: { x: number; y: number; w: number; h: number };
 }
 
 export interface PagePanels {
@@ -31,7 +34,9 @@ function normRects(v: unknown): PanelRect[] {
     const w = num(o.w);
     const h = num(o.h);
     if (x === null || y === null || w === null || h === null || w <= 0 || h <= 0) continue;
-    out.push({ x, y, w, h });
+    const f = Array.isArray(o.frame) && o.frame.length === 4 ? o.frame.map(num) : null;
+    const frame = f && f.every((n) => n !== null) && f[2]! > 0 && f[3]! > 0 ? { x: f[0]!, y: f[1]!, w: f[2]!, h: f[3]! } : null;
+    out.push(frame ? { x, y, w, h, frame } : { x, y, w, h });
   }
   return out;
 }
@@ -149,6 +154,14 @@ function orderBoxes(input: Box[], rtl: boolean): Box[] {
  * inside a row, with stacked column groups inside a row ordered recursively.
  */
 export function readingOrder(rects: PanelRect[], rtl: boolean): PanelRect[] {
-  const boxes = rects.map((r): Box => [r.x, r.y, r.x + r.w, r.y + r.h]);
-  return orderBoxes(boxes, rtl).map(([x1, y1, x2, y2]) => ({ x: x1, y: y1, w: x2 - x1, h: y2 - y1 }));
+  // Ordered by each panel's frame when the file has one: how far a panel grew over balloons must
+  // not change the order. orderBoxes hands back the same box arrays, so map them back to panels.
+  const panelOf = new Map<Box, PanelRect>();
+  const boxes = rects.map((r): Box => {
+    const f = r.frame ?? r;
+    const box: Box = [f.x, f.y, f.x + f.w, f.y + f.h];
+    panelOf.set(box, r);
+    return box;
+  });
+  return orderBoxes(boxes, rtl).map((box) => panelOf.get(box)!);
 }

@@ -164,7 +164,7 @@ class RemoteLibraryTest(unittest.TestCase):
     def test_panel_data_once_the_pc_made_it(self):
         lib = Path(self.hub.library.root) / "Berserk"
         lib.mkdir()
-        doc = {"bubbles": "m", "growth": 2, "pages": {"001.jpg": {"w": 100, "h": 150, "panels": [{"x": 1, "y": 2, "w": 30, "h": 40}]}}}
+        doc = {"bubbles": "m", "growth": 3, "pages": {"001.jpg": {"w": 100, "h": 150, "panels": [{"x": 1, "y": 2, "w": 30, "h": 40}]}}}
         for name, panels in (("ready.cbz", doc), ("old.cbz", {"pages": {}})):
             with zipfile.ZipFile(lib / name, "w") as z:
                 z.writestr("001.jpg", b"\xff\xd8x\xff\xd9")
