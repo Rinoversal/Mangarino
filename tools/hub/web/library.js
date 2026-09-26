@@ -87,20 +87,6 @@
       // ignore
     }
   }
-  function renderDirection() {
-    document.querySelectorAll('[data-dir]').forEach((b) => {
-      const on = (b.dataset.dir === 'rtl') === prefs.rtl;
-      b.classList.toggle('on', on);
-      b.setAttribute('aria-checked', String(on));
-    });
-  }
-  document.querySelectorAll('[data-dir]').forEach((b) => {
-    b.onclick = () => {
-      prefs.rtl = b.dataset.dir === 'rtl';
-      savePrefs();
-      renderDirection();
-    };
-  });
 
   // ---------------------------------------------------------------- library
   // The PC's own volumes, plus what paired devices have that the PC doesn't (as they last
@@ -614,7 +600,6 @@
   $('dirBtn').onclick = () => {
     prefs.rtl = !prefs.rtl;
     savePrefs();
-    renderDirection();
     showPage(false);
   };
   let appFullscreen = false;
@@ -669,7 +654,6 @@
     }
   }, 8000);
 
-  renderDirection();
   paint($('reader'));
 
   /** #read/<volume id> opens a volume straight away (from a link, or the tray). */
