@@ -1,8 +1,21 @@
-# panelizer
+# Panelarino
 
-PC companion tool for Mangarino. Detects manga panels on every page of a CBZ/ZIP and stores
-them inside the archive as `mangarino-panels.json`, so the reader can do panel-by-panel
-navigation without running a model on the tablet.
+Mangarino's panel tool, for the PC (it lives in `tools/panelizer`). It finds the panels on every
+page of a CBZ/ZIP, grows each one over the speech bubbles and captions that spill over its border,
+puts them in reading order, and stores the result inside the archive as `mangarino-panels.json`,
+so the reader can go panel by panel without running a model on the tablet. Mangarino Hub runs it
+by itself.
+
+Panelarino's own work is the rules around the detection models: growing panels over balloons
+(also across the gap between two panels), taking in lettering that sticks out of a balloon,
+dropping boxes drawn around two panels at once or around one panel twice, and a reading order
+that growth can't change. They were tuned on a page-by-page review of 19 volumes of Berserk
+(4,344 pages).
+
+**Credit:** Panelarino is by Rinoversal (Carterino), BSD-2-Clause (see the repository's
+[LICENSE](../../LICENSE)). If you use it or its rules, keep the copyright notice and credit
+"Panelarino by Rinoversal". It runs other people's models and libraries, which need credit too:
+see [CREDITS.md](../../CREDITS.md). Ultralytics, which runs the panel model, is AGPL-3.0.
 
 ## Requirements
 

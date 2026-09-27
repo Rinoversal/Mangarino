@@ -13,7 +13,14 @@ Mangarino is built on other people's work. Thank you.
     'Manga109' with Annotations for Multimedia Applications." IEEE MultiMedia 27(2), 2020.
   - Matsui, Ito, Aramaki, Fujimoto, Ogawa, Yamasaki, Aizawa. "Sketch-based Manga Retrieval
     using Manga109 Dataset." Multimedia Tools and Applications 76(20), 2017.
-- **Ultralytics** (AGPL-3.0) runs the model on the PC. It is not part of the app.
+- **Comic text and bubble detector (RT-DETR-v2)** by ogkalu, Apache-2.0.
+  https://huggingface.co/ogkalu/comic-text-and-bubble-detector
+  Used by Panelarino to find whole speech balloons, so panels can grow over them.
+- **Ultralytics** (AGPL-3.0) runs the panel model on the PC. It is not part of the app.
+- **Hugging Face Transformers** (Apache-2.0) runs the bubble model on the PC.
+
+Panelarino, the panel tool in `tools/panelizer`, is original work (BSD-2-Clause, see LICENSE):
+credit "Panelarino by Rinoversal" when you use it.
 
 ## App
 

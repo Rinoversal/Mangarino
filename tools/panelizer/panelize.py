@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""panelize.py - detect manga panels in CBZ/ZIP archives (or folders of images)
+"""Panelarino (panelize.py) - detect manga panels in CBZ/ZIP archives (or folders of images)
 and store the result as a `mangarino-panels.json` entry for the Mangarino reader.
+Panelarino by Rinoversal (Carterino), BSD-2-Clause; credit "Panelarino by Rinoversal".
 
 Panels: leoxs22/manga-panel-detector-yolo26n (Apache-2.0), a YOLO26-nano fine-tuned
 on Manga109-s. Classes: 0 = panel ("frame"), 1 = text. Input size 640, recommended conf 0.25.
@@ -716,6 +717,7 @@ def build_json(pages: dict, conf: float, rtl: bool, bubbles: str | None = None) 
         "text": True,
         "bubbles": bubbles,
         "growth": GROWTH,
+        "tool": "Panelarino",
         "model": MODEL_REPO,
         "conf": conf,
         "pages": pages,

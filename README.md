@@ -13,7 +13,7 @@ your place per series and per volume. Bookmarks are one tap away.
   for your PC
 - **Details:** [TECHNICAL.md](TECHNICAL.md) explains how the reader gets pages out of a 500 MB zip
   without extracting it, and how panel mode works
-- **Panel tool:** [tools/panelizer](tools/panelizer/README.md) runs on your PC and writes panel
+- **Panel tool:** [Panelarino](tools/panelizer/README.md) runs on your PC and writes panel
   boxes into each CBZ
 - **PC hub:** [tools/hub](tools/hub/README.md) shares your PC's manga with the app over Wi-Fi (or
   from anywhere with Tailscale), and adds panels on the PC's graphics card
