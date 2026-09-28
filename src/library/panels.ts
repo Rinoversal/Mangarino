@@ -34,7 +34,10 @@ function normRects(v: unknown): PanelRect[] {
     const w = num(o.w);
     const h = num(o.h);
     if (x === null || y === null || w === null || h === null || w <= 0 || h <= 0) continue;
-    const f = Array.isArray(o.frame) && o.frame.length === 4 ? o.frame.map(num) : null;
+    // In the panel file the frame is [x, y, w, h]; once saved on this device it's {x, y, w, h}.
+    const fo = o.frame as unknown;
+    const fr = fo && typeof fo === 'object' && !Array.isArray(fo) ? (fo as Record<string, unknown>) : null;
+    const f = Array.isArray(fo) && fo.length === 4 ? fo.map(num) : fr ? [num(fr.x), num(fr.y), num(fr.w), num(fr.h)] : null;
     const frame = f && f.every((n) => n !== null) && f[2]! > 0 && f[3]! > 0 ? { x: f[0]!, y: f[1]!, w: f[2]!, h: f[3]! } : null;
     out.push(frame ? { x, y, w, h, frame } : { x, y, w, h });
   }

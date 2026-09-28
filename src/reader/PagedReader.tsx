@@ -43,12 +43,14 @@ function PageCell({
   onLoaded?: (i: number, w: number, h: number) => void;
 }) {
   const uri = useReaderPages((s) => s.pageUris[index]);
+  const version = useReaderPages((s) => s.versions[index] ?? 0);
   const error = useReaderPages((s) => s.errors[index]);
   const retry = useCallback(() => onRetry(index), [onRetry, index]);
   const loaded = useCallback((w: number, h: number) => onLoaded?.(index, w, h), [onLoaded, index]);
   return (
     <ZoomablePage
       uri={uri}
+      version={version}
       error={error}
       width={width}
       height={height}

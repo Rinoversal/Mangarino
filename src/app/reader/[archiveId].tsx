@@ -1,3 +1,4 @@
+import { Paths } from 'expo-file-system';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { NavigationBar } from 'expo-navigation-bar';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -54,6 +55,18 @@ export default function ReaderScreen() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+
+  // A nearly full device clears the app's page cache as fast as pages are written: they show black.
+  useEffect(() => {
+    try {
+      const free = Paths.availableDiskSpace;
+      if (free > 0 && free < 1.5e9) {
+        setNotice(`This device is almost full (${(free / 1e9).toFixed(1)} GB free), so pages may not show. Free up some space.`);
+      }
+    } catch {
+      // unknown: say nothing
+    }
+  }, []);
 
   const loaderRef = useRef<PageLoader | null>(null);
   const pagerRef = useRef<PagerHandle>(null);
@@ -304,7 +317,7 @@ export default function ReaderScreen() {
 
   useEffect(() => {
     if (!notice) return;
-    const t = setTimeout(() => setNotice(null), 1500);
+    const t = setTimeout(() => setNotice(null), notice.length > 60 ? 6000 : 1500);
     return () => clearTimeout(t);
   }, [notice]);
 
@@ -369,6 +382,7 @@ export default function ReaderScreen() {
           onSingleTap={onSingleTap}
           onVerticalSwipe={toggleChrome}
           onEndReached={() => void goToNextArchive()}
+          onPageMissing={(i) => loaderRef.current?.retry(i)}
         />
       ) : (
         <PagedReader

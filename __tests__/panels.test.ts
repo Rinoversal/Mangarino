@@ -46,6 +46,12 @@ describe('readingOrder', () => {
     expect(rects[1].frame).toBeUndefined();
   });
 
+  it('keeps the frame once panels are saved on the device', () => {
+    const fromFile = parsePagePanels(JSON.stringify([{ x: 0, y: 0, w: 1000, h: 500, frame: [0, 0, 480, 500] }]));
+    const saved = parsePagePanels(JSON.stringify(fromFile)); // what the reader gets back from the database
+    expect(saved[0].frame).toEqual({ x: 0, y: 0, w: 480, h: 500 });
+  });
+
   it('re-sorts stored panels for the requested direction', () => {
     const json = JSON.stringify([B, A, D, C]);
     expect(parsePagePanels(json)).toEqual([B, A, D, C]);

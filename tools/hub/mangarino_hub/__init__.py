@@ -1,6 +1,6 @@
 """Mangarino Hub: shares a PC manga folder with the Mangarino app over the home network."""
 
-VERSION = "1.1.2"
+VERSION = "1.1.3"
 API_VERSION = 1
 from .brand import PORT as DEFAULT_PORT  # noqa: E402  6264 ("MANG" on a phone keypad); test builds differ
 

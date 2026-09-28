@@ -1,5 +1,5 @@
 import { Image, ImageLoadEventData } from 'expo-image';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Directions, Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withDecay, withTiming } from 'react-native-reanimated';
@@ -18,6 +18,8 @@ export interface ZoomablePageProps {
   /** Vertical swipe (up or down) while not zoomed; used to toggle the reader menu. */
   onVerticalSwipe?: () => void;
   onRetry?: () => void;
+  /** Bumped when the page file is rewritten: the image reloads. */
+  version?: number;
   onLoaded?: (w: number, h: number) => void;
 }
 
@@ -41,6 +43,7 @@ export function ZoomablePage({
   onSingleTap,
   onVerticalSwipe,
   onRetry,
+  version,
   onLoaded,
 }: ZoomablePageProps) {
   const scale = useSharedValue(1);
@@ -174,6 +177,15 @@ export function ZoomablePage({
     transform: [{ translateX: tx.value }, { translateY: ty.value }, { scale: scale.value }],
   }));
 
+  // The page file can vanish after it was written (Android clears app caches when storage runs
+  // low): unpack it again (a few times at most) instead of showing black.
+  const reloads = useRef(0);
+  const handleError = useCallback(() => {
+    if (reloads.current >= 3) return;
+    reloads.current += 1;
+    onRetry?.();
+  }, [onRetry]);
+
   const handleLoad = useCallback(
     (e: ImageLoadEventData) => {
       const src = e.source;
@@ -187,6 +199,7 @@ export function ZoomablePage({
       <Animated.View style={[{ width, height }, styles.page, animatedStyle]}>
         {uri ? (
           <Image
+            key={`${uri}#${version ?? 0}`}
             source={{ uri }}
             style={styles.fill}
             contentFit="contain"
@@ -194,6 +207,7 @@ export function ZoomablePage({
             cachePolicy="none"
             transition={0}
             onLoad={handleLoad}
+            onError={handleError}
           />
         ) : error ? (
           <View style={styles.center}>

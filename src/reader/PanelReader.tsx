@@ -27,12 +27,28 @@ export interface PanelReaderProps {
   onSingleTap: (xFrac: number, yFrac: number) => void;
   onVerticalSwipe?: () => void;
   onEndReached: () => void;
+  /** The page's image file is gone (Android cleared it): unpack it again. */
+  onPageMissing?: (pageIndex: number) => void;
 }
 
 const FIT_MARGIN = 0.96;
 const MAX_PAGE_FIT_MULTIPLE = 3;
 const MOVE_MS = 280;
 const FADE_MS = 140;
+/** A page turn crossfades from the page being left to the new one, once the new one has loaded. */
+const CROSSFADE_MS = 220;
+const READY_TIMEOUT_MS = 1500; // show the new page anyway if its image never reports it loaded
+const MAX_RELOADS = 3;
+
+/** The page being left, frozen where it was, drawn under the new page until the crossfade ends. */
+interface Outgoing {
+  uri: string;
+  w: number;
+  h: number;
+  t: { s: number; tx: number; ty: number };
+  rect: PanelRect;
+  masked: boolean;
+}
 /** Extra room kept around each panel, as a fraction of the page's shorter side, so art and
  * speech bubbles touching the panel border are not clipped or dimmed. Panels from 1.1.1's
  * panelizer (they have a frame) already grew over their balloons, so they need less, and more
@@ -63,7 +79,7 @@ function fitTarget(rect: PanelRect, imgW: number, imgH: number, vw: number, vh: 
 
 /** Guided view: animates translate/scale so each precomputed panel fills the viewport. */
 export const PanelReader = forwardRef<PanelHandle, PanelReaderProps>(function PanelReader(
-  { pages, initialPage, initialPanel, rtl, width, height, onPositionChange, onSingleTap, onVerticalSwipe, onEndReached },
+  { pages, initialPage, initialPanel, rtl, width, height, onPositionChange, onSingleTap, onVerticalSwipe, onEndReached, onPageMissing },
   ref,
 ) {
   const [pageIndex, setPageIndex] = useState(initialPage);
@@ -71,6 +87,8 @@ export const PanelReader = forwardRef<PanelHandle, PanelReaderProps>(function Pa
   const [fullPage, setFullPage] = useState(false);
   const page = pages[pageIndex];
   const uri = useReaderPages((s) => s.pageUris[pageIndex]);
+  const version = useReaderPages((s) => s.versions[pageIndex] ?? 0);
+  const nextUri = useReaderPages((s) => s.pageUris[pageIndex + 1]);
   const error = useReaderPages((s) => s.errors[pageIndex]);
   // Re-sorted for the current direction: panel order in the archive is fixed at panelize time.
   const panels = useMemo(() => parsePagePanels(page?.panels_json ?? null, rtl), [page, rtl]);
@@ -89,6 +107,29 @@ export const PanelReader = forwardRef<PanelHandle, PanelReaderProps>(function Pa
   const rw = useSharedValue(1);
   const rh = useSharedValue(1);
   const pageChanged = useRef(false);
+  const lastView = useRef<{ t: Outgoing['t']; rect: PanelRect; masked: boolean } | null>(null);
+  const [outgoing, setOutgoing] = useState<Outgoing | null>(null);
+  const outOpacity = useSharedValue(1);
+  const outTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [forced, setForced] = useState<string | null>(null);
+  const imageReady = !!uri && (loadedDims?.uri === uri || forced === uri);
+
+  useEffect(() => {
+    if (!uri) return;
+    const id = setTimeout(() => setForced(uri), READY_TIMEOUT_MS);
+    return () => clearTimeout(id);
+  }, [uri]);
+  useEffect(() => () => {
+    if (outTimer.current) clearTimeout(outTimer.current);
+  }, []);
+  // Warm up the next page so turning to it is instant.
+  useEffect(() => {
+    if (nextUri) Image.prefetch(nextUri, 'memory').catch(() => {});
+  }, [nextUri]);
+  // The new page failed to unpack: stop holding the old one so the error shows.
+  useEffect(() => {
+    if (error) setOutgoing(null);
+  }, [error]);
 
   const clampPanel = useCallback(
     (pi: number, count: number) => (count === 0 ? 0 : Math.max(0, Math.min(count - 1, pi))),
@@ -98,13 +139,19 @@ export const PanelReader = forwardRef<PanelHandle, PanelReaderProps>(function Pa
   const goToPage = useCallback(
     (nextPage: number, nextPanel: number) => {
       if (nextPage < 0 || nextPage >= pages.length) return;
+      // Keep the page being left on screen (unless it never showed) until the new one is ready.
+      if (!pageChanged.current && uri && imgW && imgH && lastView.current) {
+        if (outTimer.current) clearTimeout(outTimer.current);
+        setOutgoing({ uri, w: imgW, h: imgH, ...lastView.current });
+        outOpacity.value = 1;
+      }
       pageChanged.current = true;
-      opacity.value = withTiming(0, { duration: FADE_MS });
+      opacity.value = 0;
       setFullPage(false);
       setPageIndex(nextPage);
       setPanelIndex(nextPanel);
     },
-    [pages.length, opacity],
+    [pages.length, opacity, outOpacity, uri, imgW, imgH],
   );
 
   const next = useCallback(() => {
@@ -145,16 +192,19 @@ export const PanelReader = forwardRef<PanelHandle, PanelReaderProps>(function Pa
     onPositionChange(pageIndex, clampPanel(panelIndex, panels.length));
   }, [pageIndex, panelIndex, panels.length, clampPanel, onPositionChange]);
 
-  // Animate to the current panel whenever the target changes.
+  // Animate to the current panel whenever the target changes. After a page turn the new page
+  // waits until its image has loaded, then crossfades in over the page being left.
   useEffect(() => {
     if (!imgW || !imgH || !uri) return;
-    const rect: PanelRect =
-      fullPage || panels.length === 0
-        ? { x: 0, y: 0, w: imgW, h: imgH }
-        : padRect(panels[clampPanel(panelIndex, panels.length)], imgW, imgH);
+    const masked = !(fullPage || panels.length === 0);
+    const rect: PanelRect = masked
+      ? padRect(panels[clampPanel(panelIndex, panels.length)], imgW, imgH)
+      : { x: 0, y: 0, w: imgW, h: imgH };
     const t = fitTarget(rect, imgW, imgH, width, height);
     if (pageChanged.current) {
+      if (!imageReady) return;
       pageChanged.current = false;
+      lastView.current = { t, rect, masked };
       tx.value = t.tx;
       ty.value = t.ty;
       scale.value = t.s;
@@ -162,9 +212,13 @@ export const PanelReader = forwardRef<PanelHandle, PanelReaderProps>(function Pa
       ry.value = rect.y;
       rw.value = rect.w;
       rh.value = rect.h;
-      opacity.value = withTiming(1, { duration: FADE_MS });
+      opacity.value = withTiming(1, { duration: CROSSFADE_MS });
+      outOpacity.value = withTiming(0, { duration: CROSSFADE_MS });
+      if (outTimer.current) clearTimeout(outTimer.current);
+      outTimer.current = setTimeout(() => setOutgoing(null), CROSSFADE_MS + 60);
       return;
     }
+    lastView.current = { t, rect, masked };
     const cfg = { duration: MOVE_MS, easing: Easing.out(Easing.cubic) };
     tx.value = withTiming(t.tx, cfg);
     ty.value = withTiming(t.ty, cfg);
@@ -174,12 +228,14 @@ export const PanelReader = forwardRef<PanelHandle, PanelReaderProps>(function Pa
     rw.value = withTiming(rect.w, cfg);
     rh.value = withTiming(rect.h, cfg);
     opacity.value = withTiming(1, { duration: FADE_MS });
-  }, [imgW, imgH, uri, fullPage, panels, panelIndex, width, height, clampPanel, tx, ty, scale, opacity, rx, ry, rw, rh]);
+  }, [imgW, imgH, uri, imageReady, fullPage, panels, panelIndex, width, height, clampPanel, tx, ty, scale, opacity, outOpacity, rx, ry, rw, rh]);
 
   const stageStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,
     transform: [{ translateX: tx.value }, { translateY: ty.value }, { scale: scale.value }],
   }));
+
+  const outStyle = useAnimatedStyle(() => ({ opacity: outOpacity.value }));
 
   // Dimming mask: four rectangles around the current panel, in image coordinates inside the stage.
   const stageW = imgW ?? 1;
@@ -246,21 +302,34 @@ export const PanelReader = forwardRef<PanelHandle, PanelReaderProps>(function Pa
     },
     [uri],
   );
+  // The page file can vanish after it was written (Android clears app caches when storage runs
+  // low): unpack it again (a few times at most) instead of showing black.
+  const reloads = useRef(new Map<string, number>());
+  const onImageError = useCallback(() => {
+    if (!uri) return;
+    const n = reloads.current.get(uri) ?? 0;
+    if (n >= MAX_RELOADS) return;
+    reloads.current.set(uri, n + 1);
+    onPageMissing?.(pageIndex);
+  }, [uri, pageIndex, onPageMissing]);
 
   return (
     <GestureDetector gesture={composed}>
       <View style={[styles.viewport, { width, height }]}>
+        {outgoing ? <OutgoingPage page={outgoing} outlineColor={outlineColor} style={outStyle} /> : null}
         {uri && imgW && imgH ? (
           <Animated.View style={[styles.stage, { width: imgW, height: imgH }, stageStyle]}>
             <Image
+              key={`${uri}#${version}`}
               source={{ uri }}
               style={{ width: imgW, height: imgH }}
               contentFit="fill"
               allowDownscaling={false}
-              cachePolicy="none"
+              cachePolicy="memory"
               transition={0}
               recyclingKey={uri}
               onLoad={onLoad}
+              onError={onImageError}
             />
             <Animated.View pointerEvents="none" style={[styles.mask, maskTop]} />
             <Animated.View pointerEvents="none" style={[styles.mask, maskBottom]} />
@@ -270,9 +339,9 @@ export const PanelReader = forwardRef<PanelHandle, PanelReaderProps>(function Pa
           </Animated.View>
         ) : uri ? (
           // Dimensions unknown: mount a hidden image to learn them.
-          <Image source={{ uri }} style={styles.probe} onLoad={onLoad} cachePolicy="none" />
+          <Image key={`${uri}#${version}`} source={{ uri }} style={styles.probe} onLoad={onLoad} onError={onImageError} cachePolicy="memory" />
         ) : null}
-        {!uri || !imgW || !imgH ? (
+        {(!uri || !imgW || !imgH) && !outgoing ? (
           <View style={styles.center} pointerEvents="none">
             {error ? <Text style={styles.error}>{error}</Text> : <ActivityIndicator color="#888" />}
             <Text style={styles.label}>Page {pageIndex + 1}</Text>
@@ -282,6 +351,31 @@ export const PanelReader = forwardRef<PanelHandle, PanelReaderProps>(function Pa
     </GestureDetector>
   );
 });
+
+/** The page being left, frozen where it was (with its dimming), under the page turned to. */
+function OutgoingPage({ page, outlineColor, style }: { page: Outgoing; outlineColor: string; style: object }) {
+  const { w, h, t, rect } = page;
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        styles.stage,
+        { width: w, height: h, transform: [{ translateX: t.tx }, { translateY: t.ty }, { scale: t.s }] },
+        style,
+      ]}>
+      <Image source={{ uri: page.uri }} style={{ width: w, height: h }} contentFit="fill" allowDownscaling={false} cachePolicy="memory" transition={0} />
+      {page.masked ? (
+        <>
+          <View style={[styles.mask, { left: 0, top: 0, width: w, height: Math.max(0, rect.y) }]} />
+          <View style={[styles.mask, { left: 0, top: rect.y + rect.h, width: w, height: Math.max(0, h - rect.y - rect.h) }]} />
+          <View style={[styles.mask, { left: 0, top: rect.y, width: Math.max(0, rect.x), height: rect.h }]} />
+          <View style={[styles.mask, { left: rect.x + rect.w, top: rect.y, width: Math.max(0, w - rect.x - rect.w), height: rect.h }]} />
+          <View style={[styles.outline, { borderColor: outlineColor, left: rect.x, top: rect.y, width: rect.w, height: rect.h }]} />
+        </>
+      ) : null}
+    </Animated.View>
+  );
+}
 
 const styles = StyleSheet.create({
   viewport: { backgroundColor: '#000', overflow: 'hidden' },
